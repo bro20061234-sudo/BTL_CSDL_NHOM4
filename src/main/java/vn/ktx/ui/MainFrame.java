@@ -39,38 +39,55 @@ import java.util.List;
 public class MainFrame extends JFrame {
     private static final long serialVersionUID = 1L;
     private transient final KtxDao dao = new KtxDao();
-    private final JTable studentTable = new JTable();
-    private final JTable roomTable = new JTable();
-    private final JTable serviceTable = new JTable();
-    private final JTable usageTable = new JTable();
-    private final JTable vehicleTable = new JTable();
-    private final JTable parkingTable = new JTable();
-    private final JTable guestTable = new JTable();
-    private final JTable invoiceTable = new JTable();
+    private final JTable studentTable = new DataTable();
+    private final JTable roomTable = new DataTable();
+    private final JTable serviceTable = new DataTable();
+    private final JTable usageTable = new DataTable();
+    private final JTable vehicleTable = new DataTable();
+    private final JTable parkingTable = new DataTable();
+    private final JTable guestTable = new DataTable();
+    private final JTable invoiceTable = new DataTable();
     private final JTextField studentSearch = new JTextField(22);
     private final JSpinner invoiceMonth = new JSpinner(new SpinnerNumberModel(LocalDate.now().getMonthValue(), 1, 12, 1));
     private final JSpinner invoiceYear = new JSpinner(new SpinnerNumberModel(LocalDate.now().getYear(), 2000, 2200, 1));
     private String invoiceCaption = "";
+    private WorkspacePanel workspace;
+    private ExtensionPanel extensions;
+    private final JComboBox<String> studentRoomFilter = new JComboBox<>(new String[]{"Tất cả phòng", "Chưa xếp phòng"});
+    private final JLabel studentSelection = UiTheme.label("Chọn một sinh viên để thao tác.",13,false);
+    private final JLabel studentCount = UiTheme.label("",12,false);
+    private OverviewPanel studentOverview;
 
-    public MainFrame() {
+    public MainFrame(vn.ktx.model.UserSession session) {
+        if (!session.isStaff()) throw new IllegalArgumentException("Chức năng dành cho nhân viên quản lý.");
         setTitle("Quản lý Ký túc xá Sinh viên");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setMinimumSize(new Dimension(1050, 660));
-        setSize(1250, 780);
+        setMinimumSize(new Dimension(1180, 740));
+        setSize(1440, 920);
         setLocationRelativeTo(null);
-        setLayout(new BorderLayout(10, 10));
-        add(header(), BorderLayout.NORTH);
-
-        JTabbedPane tabs = new JTabbedPane();
-        tabs.addTab("Sinh viên", studentPanel());
-        tabs.addTab("Phòng ở", roomPanel());
-        tabs.addTab("Dịch vụ", servicePanel());
-        tabs.addTab("Nghiệp vụ", operationsPanel());
-        tabs.addTab("Hóa đơn tháng", invoicePanel());
-        tabs.addTab("Báo cáo", reportPanel());
-        add(tabs, BorderLayout.CENTER);
-        add(new JLabel("  Kết nối MySQL qua JDBC · Dữ liệu lấy trực tiếp từ cơ sở dữ liệu", SwingConstants.LEFT), BorderLayout.SOUTH);
-        refreshAll();
+        extensions = new ExtensionPanel(session, false);
+        workspace = new WorkspacePanel(session, () -> vn.ktx.Main.logout(this));
+        workspace.group("Tổng quan");
+        workspace.page("overview", "Bảng điều khiển", "Tổng quan ký túc xá", "Theo dõi cư dân, phòng trống và công việc cần xử lý.", () -> new OverviewPanel(false));
+        workspace.group("Quản lý");
+        workspace.page("students", "Sinh viên", "Quản lý sinh viên", "Tra cứu hồ sơ và quản lý thông tin lưu trú.", this::studentPanel);
+        workspace.page("rooms", "Phòng ở", "Quản lý phòng ở", "Giá thuê, sức chứa và số sinh viên đang ở trong từng phòng.", this::roomPanel);
+        workspace.page("contracts", "Hợp đồng", "Hợp đồng lưu trú", "Lập hợp đồng, gia hạn thời gian ở và thanh lý khi trả phòng.", () -> extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.CONTRACT));
+        workspace.page("services", "Dịch vụ & gửi xe", "Dịch vụ & gửi xe", "Danh mục dịch vụ, lượt sử dụng và quản lý xe vé tháng.", () -> WorkspacePanel.tabs(new String[]{"Danh mục dịch vụ", "Sử dụng dịch vụ", "Xe vé tháng", "Nhật ký gửi xe"}, servicePanel(), usagePanel(), vehiclePanel(), parkingPanel()));
+        workspace.page("guests", "Khách đến thăm", "Khách đến thăm", "Ghi nhận thông tin khách và sinh viên được thăm.", this::guestPanel);
+        workspace.group("Yêu cầu");
+        workspace.page("requests", "Đăng ký & chuyển phòng", "Đăng ký & chuyển phòng", "Duyệt đơn lưu trú, kiểm tra chỗ trống và xử lý chuyển phòng.", () -> WorkspacePanel.tabs(new String[]{"Đăng ký lưu trú", "Chuyển phòng"}, extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.APPLICATION), extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.TRANSFER)));
+        workspace.page("maintenance", "Sửa chữa & tài sản", "Sửa chữa & tài sản", "Tiếp nhận sự cố, cập nhật tiến độ và theo dõi tài sản bàn giao.", () -> WorkspacePanel.tabs(new String[]{"Yêu cầu sửa chữa", "Tài sản phòng"}, extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.REPAIR), extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.ASSET)));
+        workspace.group("Tài chính");
+        workspace.page("billing", "Hóa đơn & thanh toán", "Hóa đơn & thanh toán", "Tính phí theo tháng, theo dõi công nợ và ghi nhận khoản thu.", () -> WorkspacePanel.tabs(new String[]{"Hóa đơn tháng", "Công nợ", "Lịch sử thanh toán"}, invoicePanel(), extensions.billingPanel(), extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.PAYMENT)));
+        workspace.page("utilities", "Điện nước", "Điện nước hằng tháng", "Nhập chỉ số, đơn giá và phân bổ tiền điện nước cho cư dân.", () -> extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.UTILITY));
+        workspace.page("reports", "Báo cáo", "Báo cáo & thống kê", "Tổng hợp dịch vụ, khách đến thăm và doanh thu theo thời gian.", this::reportPanel);
+        workspace.group("Hệ thống");
+        workspace.page("notices", "Thông báo & vi phạm", "Thông báo & vi phạm", "Gửi thông báo, theo dõi nội quy và các biên bản vi phạm.", () -> WorkspacePanel.tabs(new String[]{"Thông báo", "Vi phạm nội quy"}, extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.NOTICE), extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.VIOLATION)));
+        workspace.page("reminders", "Nhắc hạn", "Nhắc hạn & công nợ", "Các hợp đồng sắp hết hạn và khoản thu chưa thanh toán đủ.", extensions::reminderPanel);
+        if (session.isAdmin()) workspace.page("accounts", "Tài khoản", "Quản lý tài khoản", "Tạo tài khoản và phân quyền cho nhân viên, sinh viên.", extensions::accountPanel);
+        setContentPane(workspace);
+        workspace.showPage("students");
     }
 
     private JPanel header() {
@@ -89,26 +106,52 @@ public class MainFrame extends JFrame {
     }
 
     private JPanel studentPanel() {
-        JPanel panel = new JPanel(new BorderLayout(8, 8));
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JPanel panel = new JPanel(new BorderLayout(0, 16));
+        JPanel top = new JPanel(new BorderLayout(0, 16));
+        studentOverview = new OverviewPanel(true);
+        top.add(studentOverview, BorderLayout.NORTH);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 6));
         JButton search = button("Tìm kiếm");
         JButton add = button("Thêm sinh viên");
-        JButton edit = button("Sửa");
+        JButton edit = button("Chỉnh sửa");
         JButton delete = button("Xóa");
         JButton refresh = button("Làm mới");
-        actions.add(new JLabel("Mã / Họ tên / Lớp:"));
+        actions.add(new JLabel("Tìm kiếm:"));
+        studentSearch.setToolTipText("Nhập mã sinh viên, họ tên hoặc lớp; kết quả lọc ngay khi nhập.");
         actions.add(studentSearch);
-        actions.add(search);
-        actions.add(add);
-        actions.add(edit);
-        actions.add(delete);
+        actions.add(studentRoomFilter);
         actions.add(refresh);
-        panel.add(actions, BorderLayout.NORTH);
+        actions.add(add);
+        top.add(actions, BorderLayout.SOUTH);
+        panel.add(top, BorderLayout.NORTH);
         panel.add(new JScrollPane(studentTable), BorderLayout.CENTER);
-        search.addActionListener(e -> load(studentTable, KtxDao.STUDENT_COLUMNS, () -> dao.findStudents(studentSearch.getText())));
+        JPanel bottom = new JPanel(new BorderLayout(0,12));
+        JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT,8,0));
+        JButton profile = button("Xem hồ sơ"); JButton transfer = button("Chuyển phòng");
+        footer.add(profile); footer.add(edit); footer.add(transfer); footer.add(delete);
+        JPanel selectionBar = new JPanel(new BorderLayout(12,0)); selectionBar.add(studentSelection,BorderLayout.WEST); selectionBar.add(footer,BorderLayout.EAST);
+        bottom.add(selectionBar,BorderLayout.NORTH); bottom.add(studentCount,BorderLayout.SOUTH); panel.add(bottom,BorderLayout.SOUTH);
+        search.addActionListener(e -> applyStudentFilter());
+        studentSearch.addActionListener(e -> applyStudentFilter());
+        studentSearch.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent e) { applyStudentFilter(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent e) { applyStudentFilter(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent e) { applyStudentFilter(); }
+        });
+        studentRoomFilter.addActionListener(e -> applyStudentFilter());
+        studentTable.getSelectionModel().addListSelectionListener(e -> {
+            Object[] row=selectedOrNull(studentTable); boolean chosen=row!=null;
+            studentSelection.setText(chosen?"Đã chọn: "+row[0]+" · "+row[2]:"Chọn một sinh viên để thao tác.");
+            for(JButton b:new JButton[]{profile,edit,transfer,delete}) b.setEnabled(chosen);
+        });
+        for(JButton b:new JButton[]{profile,edit,transfer,delete}) b.setEnabled(false);
+        profile.addActionListener(e -> showStudentProfile());
+        transfer.addActionListener(e -> { Object[] row=selected(studentTable); if(row!=null) extensions.createTransfer(row[0].toString()); });
+        studentTable.addMouseListener(new java.awt.event.MouseAdapter() { @Override public void mouseClicked(java.awt.event.MouseEvent e) { if(e.getClickCount()==2) showStudentProfile(); } });
         refresh.addActionListener(e -> {
             studentSearch.setText("");
-            load(studentTable, KtxDao.STUDENT_COLUMNS, () -> dao.findStudents(""));
+            studentRoomFilter.setSelectedIndex(0);
+            refreshStudents(); studentOverview.reload();
         });
         add.addActionListener(e -> studentForm(null));
         edit.addActionListener(e -> {
@@ -116,7 +159,38 @@ public class MainFrame extends JFrame {
             if (row != null) studentForm(row);
         });
         delete.addActionListener(e -> deleteSelected(studentTable, "sinh viên", row -> dao.deleteStudent(row[0].toString())));
+        onShow(panel, this::refreshStudents);
         return panel;
+    }
+
+    public void refreshStudents() { load(studentTable, KtxDao.STUDENT_COLUMNS, () -> dao.findStudents("")); }
+
+    @SuppressWarnings("unchecked")
+    private void applyStudentFilter() {
+        if (!(studentTable.getRowSorter() instanceof javax.swing.table.TableRowSorter<?> sorter)) return;
+        String term=studentSearch.getText().trim().toLowerCase(java.util.Locale.forLanguageTag("vi-VN"));
+        String room=String.valueOf(studentRoomFilter.getSelectedItem());
+        ((javax.swing.table.TableRowSorter<javax.swing.table.TableModel>)sorter).setRowFilter(new javax.swing.RowFilter<javax.swing.table.TableModel,Integer>() {
+            @Override public boolean include(Entry<? extends javax.swing.table.TableModel,? extends Integer> entry) {
+                String r=entry.getStringValue(6);
+                boolean matchesRoom=room.equals("Tất cả phòng") || room.equals("Chưa xếp phòng") && r.isBlank() || room.equals(r);
+                boolean matchesText=term.isEmpty();
+                for(int c:new int[]{0,2,4}) matchesText |= entry.getStringValue(c).toLowerCase(java.util.Locale.forLanguageTag("vi-VN")).contains(term);
+                return matchesRoom && matchesText;
+            }
+        });
+        studentCount.setText("Hiển thị "+studentTable.getRowCount()+" / "+studentTable.getModel().getRowCount()+" sinh viên • Nhấp đúp một dòng để xem hồ sơ.");
+    }
+
+    private void showStudentProfile() {
+        Object[] row=selected(studentTable); if(row==null) return;
+        JPanel details=new JPanel(new GridLayout(0,2,16,14));
+        for(int i=0;i<KtxDao.STUDENT_COLUMNS.length;i++) { details.add(UiTheme.label(KtxDao.STUDENT_COLUMNS[i],13,true)); details.add(UiTheme.label(text(row[i]),14,false)); }
+        JOptionPane.showMessageDialog(this,details,"Hồ sơ · "+row[2],JOptionPane.PLAIN_MESSAGE);
+    }
+
+    private void onShow(JPanel panel,Runnable action) {
+        panel.addHierarchyListener(e -> { if((e.getChangeFlags() & java.awt.event.HierarchyEvent.SHOWING_CHANGED)!=0 && panel.isShowing()) action.run(); });
     }
 
     private JPanel roomPanel() {
@@ -139,6 +213,7 @@ public class MainFrame extends JFrame {
         });
         delete.addActionListener(e -> deleteSelected(roomTable, "phòng", row -> dao.deleteRoom(row[0].toString())));
         refresh.addActionListener(e -> refreshRooms());
+        onShow(panel, this::refreshRooms);
         return panel;
     }
 
@@ -162,6 +237,7 @@ public class MainFrame extends JFrame {
         });
         delete.addActionListener(e -> deleteSelected(serviceTable, "dịch vụ", row -> dao.deleteService(row[0].toString())));
         refresh.addActionListener(e -> refreshServices());
+        onShow(panel, this::refreshServices);
         return panel;
     }
 
@@ -188,6 +264,7 @@ public class MainFrame extends JFrame {
         add.addActionListener(e -> usageForm());
         delete.addActionListener(e -> deleteSelected(usageTable, "lượt sử dụng", row -> dao.deleteUsage(number(row[0]))));
         refresh.addActionListener(e -> refreshUsages());
+        onShow(panel, this::refreshUsages);
         return panel;
     }
 
@@ -206,6 +283,7 @@ public class MainFrame extends JFrame {
         add.addActionListener(e -> vehicleForm());
         delete.addActionListener(e -> deleteSelected(table, "đăng ký xe", row -> dao.deleteVehicle(number(row[0]))));
         refresh.addActionListener(e -> refreshVehicles());
+        onShow(panel, this::refreshVehicles);
         return panel;
     }
 
@@ -223,6 +301,7 @@ public class MainFrame extends JFrame {
         add.addActionListener(e -> guestForm());
         delete.addActionListener(e -> deleteSelected(guestTable, "lượt khách", row -> dao.deleteGuest(number(row[0]))));
         refresh.addActionListener(e -> refreshGuests());
+        onShow(panel, this::refreshGuests);
         return panel;
     }
 
@@ -241,6 +320,7 @@ public class MainFrame extends JFrame {
         delete.addActionListener(e -> deleteSelected(parkingTable, "lượt gửi xe",
                 row -> dao.deleteParkingLog(number(row[0]))));
         refresh.addActionListener(e -> refreshParkingLogs());
+        onShow(panel, this::refreshParkingLogs);
         return panel;
     }
 
@@ -262,6 +342,7 @@ public class MainFrame extends JFrame {
         calculate.addActionListener(e -> refreshInvoices());
         export.addActionListener(e -> exportInvoices());
         print.addActionListener(e -> printInvoices());
+        onShow(panel, this::refreshInvoices);
         return panel;
     }
 
@@ -274,7 +355,7 @@ public class MainFrame extends JFrame {
     }
 
     private JPanel serviceUsageReportPanel() {
-        JTable table = new JTable();
+        JTable table = new DataTable();
         JDateChooser from = dateChooser(LocalDate.now().withDayOfMonth(1));
         JDateChooser to = dateChooser(LocalDate.now());
         JPanel panel = new JPanel(new BorderLayout(8, 8));
@@ -301,7 +382,7 @@ public class MainFrame extends JFrame {
     }
 
     private JPanel guestReportPanel() {
-        JTable table = new JTable();
+        JTable table = new DataTable();
         JDateChooser from = dateChooser(LocalDate.now().withDayOfMonth(1));
         JDateChooser to = dateChooser(LocalDate.now());
         JPanel panel = new JPanel(new BorderLayout(8, 8));
@@ -322,7 +403,7 @@ public class MainFrame extends JFrame {
     }
 
     private JPanel revenueReportPanel() {
-        JTable table = new JTable();
+        JTable table = new DataTable();
         JSpinner month = new JSpinner(new SpinnerNumberModel(LocalDate.now().getMonthValue(), 1, 12, 1));
         JSpinner year = new JSpinner(new SpinnerNumberModel(LocalDate.now().getYear(), 2000, 2200, 1));
         JPanel panel = new JPanel(new BorderLayout(8, 8));
@@ -557,7 +638,8 @@ public class MainFrame extends JFrame {
             showError(exception);
             return;
         }
-        load(studentTable, KtxDao.STUDENT_COLUMNS, () -> dao.findStudents(studentSearch.getText()));
+        refreshStudents();
+        if(studentOverview!=null) studentOverview.reload();
         refreshRooms();
         refreshServices();
         refreshUsages();
@@ -626,7 +708,7 @@ public class MainFrame extends JFrame {
 
     private String invoiceText() {
         StringBuilder out = new StringBuilder(invoiceCaption).append(System.lineSeparator())
-                .append("Tiền phòng + dịch vụ cơ bản + xe vé tháng + phí phát sinh").append(System.lineSeparator());
+                .append("Tiền phòng + dịch vụ cơ bản + xe vé tháng + phí phát sinh + điện nước + tiền phạt").append(System.lineSeparator());
         for (int i = 0; i < invoiceTable.getRowCount(); i++) {
             Object[] row = new Object[invoiceTable.getColumnCount()];
             for (int j = 0; j < row.length; j++) row[j] = invoiceTable.getValueAt(i, j);
@@ -636,8 +718,8 @@ public class MainFrame extends JFrame {
     }
 
     private String invoiceTextForRow(Object[] row) {
-        return String.format("%s | %s | Phòng %s | Phòng: %s | Dịch vụ: %s | Xe tháng: %s | Xe phát sinh: %s | TỔNG: %s",
-                row[0], row[1], row[2], money(row[3]), money(row[4]), money(row[5]), money(row[6]), money(row[7]));
+        return String.format("%s | %s | Phòng %s | Phòng: %s | Dịch vụ: %s | Xe tháng: %s | Xe phát sinh: %s | Điện nước: %s | Phạt: %s | TỔNG: %s",
+                row[0], row[1], row[2], money(row[3]), money(row[4]), money(row[5]), money(row[6]), money(row[8]), money(row[9]), money(row[7]));
     }
 
     private String money(Object value) {
@@ -646,17 +728,44 @@ public class MainFrame extends JFrame {
     }
 
     private void load(JTable table, String[] columns, SqlSupplier supplier) {
-        try {
-            List<Object[]> data = supplier.get();
-            DefaultTableModel model = new DefaultTableModel(columns, 0) {
-                @Override public boolean isCellEditable(int row, int column) { return false; }
-            };
-            for (Object[] row : data) model.addRow(row);
-            table.setModel(model);
-            table.setAutoCreateRowSorter(true);
-        } catch (SQLException exception) {
-            showError(exception);
-        }
+        int request=table.getClientProperty("request") instanceof Integer n?n+1:1;
+        table.putClientProperty("request",request); table.putClientProperty("loading",Boolean.TRUE); table.repaint(); table.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR));
+        if(workspace!=null) workspace.status("Đang tải dữ liệu…");
+        new javax.swing.SwingWorker<List<Object[]>,Void>() {
+            @Override protected List<Object[]> doInBackground() throws Exception { return supplier.get(); }
+            @Override protected void done() {
+                if(!java.util.Objects.equals(table.getClientProperty("request"),request)) return;
+                table.putClientProperty("loading",Boolean.FALSE);
+                table.setCursor(java.awt.Cursor.getDefaultCursor());
+                try {
+                    List<Object[]> data=get();
+                    String[] headers=columns;
+                    if(table==studentTable) { headers=java.util.Arrays.copyOf(columns,columns.length+1); headers[columns.length]="Trạng thái"; }
+                    DefaultTableModel model=new ReadOnlyTableModel(headers);
+                    for(Object[] row:data) {
+                        if(table==studentTable) { Object[] extended=java.util.Arrays.copyOf(row,row.length+1); extended[row.length]=row[6]==null || row[6].toString().isBlank()?"Chờ xếp phòng":"Đang ở"; model.addRow(extended); }
+                        else model.addRow(row);
+                    }
+                    table.setModel(model); table.setAutoCreateRowSorter(true); UiTheme.styleTable(table);
+                    if(table==studentTable) {
+                        for(int index:new int[]{5,3,1}) table.removeColumn(table.getColumnModel().getColumn(index));
+                        table.getColumnModel().getColumn(1).setPreferredWidth(220);
+                        table.getColumnModel().getColumn(4).setPreferredWidth(140);
+                        String selected=String.valueOf(studentRoomFilter.getSelectedItem());
+                        java.util.TreeSet<String> roomIds=new java.util.TreeSet<>();
+                        for(Object[] row:data) if(row[6]!=null && !row[6].toString().isBlank()) roomIds.add(row[6].toString());
+                        studentRoomFilter.removeAllItems(); studentRoomFilter.addItem("Tất cả phòng"); studentRoomFilter.addItem("Chưa xếp phòng");
+                        for(String room:roomIds) studentRoomFilter.addItem(room);
+                        if(roomIds.contains(selected) || selected.equals("Chưa xếp phòng")) studentRoomFilter.setSelectedItem(selected);
+                        applyStudentFilter();
+                    }
+                    if(workspace!=null) workspace.status("Đã tải "+data.size()+" bản ghi • Dữ liệu từ CSDL");
+                } catch(Exception exception) {
+                    if(workspace!=null) workspace.status("Không tải được dữ liệu. Hãy thử Làm mới.");
+                    if(isDisplayable()) showError(exception.getCause() instanceof Exception e?e:exception);
+                }
+            }
+        }.execute();
     }
 
     private Object[] selected(JTable table) {
@@ -669,7 +778,7 @@ public class MainFrame extends JFrame {
         int viewRow = table.getSelectedRow();
         if (viewRow < 0) return null;
         int rowIndex = table.convertRowIndexToModel(viewRow);
-        Object[] data = new Object[table.getColumnCount()];
+        Object[] data = new Object[table.getModel().getColumnCount()];
         for (int i = 0; i < data.length; i++) data[i] = table.getModel().getValueAt(rowIndex, i);
         return data;
     }
@@ -699,7 +808,7 @@ public class MainFrame extends JFrame {
     }
 
     private JButton button(String label) {
-        return new JButton(label);
+        JButton button=new JButton(label); UiTheme.styleButton(button); return button;
     }
 
     private JTextField field(String value) {
@@ -725,6 +834,7 @@ public class MainFrame extends JFrame {
             form.add(new JLabel(fields[i].toString()));
             form.add((java.awt.Component) fields[i + 1]);
         }
+        UiTheme.decorate(form);
         return JOptionPane.showConfirmDialog(this, form, title, JOptionPane.OK_CANCEL_OPTION,
                 JOptionPane.PLAIN_MESSAGE) == JOptionPane.OK_OPTION;
     }

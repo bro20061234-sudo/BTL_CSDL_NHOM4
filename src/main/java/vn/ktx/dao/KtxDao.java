@@ -16,6 +16,15 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class KtxDao {
+    public int[] getOverview() throws SQLException {
+        try (Connection c = Database.getConnection()) {
+            Object[] row = ExtensionDao.query(c, "SELECT " +
+                    "(SELECT COUNT(*) FROM SinhVien WHERE MaPhong IS NOT NULL), " +
+                    "(SELECT COUNT(*) FROM Phong p WHERE p.SoNguoiToiDa>(SELECT COUNT(*) FROM SinhVien s WHERE s.MaPhong=p.MaPhong)), " +
+                    "((SELECT COUNT(*) FROM DonDangKy WHERE TrangThai='CHO_DUYET')+(SELECT COUNT(*) FROM ChuyenPhong WHERE TrangThai='CHO_DUYET'))").get(0);
+            return new int[]{((Number)row[0]).intValue(), ((Number)row[1]).intValue(), ((Number)row[2]).intValue()};
+        }
+    }
     public static final String[] STUDENT_COLUMNS = {"Mã SV", "CCCD", "Họ tên", "Ngày sinh", "Lớp", "Quê quán", "Mã phòng", "Ngày vào KTX"};
     public static final String[] ROOM_COLUMNS = {"Mã phòng", "Số phòng", "Loại phòng", "Đơn giá/tháng", "Sức chứa", "Đang ở"};
     public static final String[] SERVICE_COLUMNS = {"Mã DV", "Tên dịch vụ", "Đơn giá"};
@@ -23,7 +32,7 @@ public class KtxDao {
     public static final String[] VEHICLE_COLUMNS = {"Mã xe", "Mã SV", "Sinh viên", "Biển số", "Loại xe", "Ngày đăng ký", "Phí tháng"};
     public static final String[] PARKING_COLUMNS = {"Mã lượt", "Mã xe", "Sinh viên", "Biển số", "Thời gian gửi", "Thời gian lấy", "Phí phát sinh"};
     public static final String[] GUEST_COLUMNS = {"Mã khách", "CCCD", "Họ tên", "Ngày sinh", "Mã SV", "Sinh viên", "Ngày đến"};
-    public static final String[] INVOICE_COLUMNS = {"Mã SV", "Họ tên", "Mã phòng", "Tiền phòng", "Dịch vụ cơ bản", "Xe vé tháng", "Xe phát sinh", "Tổng tiền"};
+    public static final String[] INVOICE_COLUMNS = {"Mã SV", "Họ tên", "Mã phòng", "Tiền phòng", "Dịch vụ cơ bản", "Xe vé tháng", "Xe phát sinh", "Tổng tiền", "Điện nước", "Tiền phạt"};
 
     public void testConnection() throws SQLException {
         try (Connection connection = Database.getConnection()) {
@@ -235,9 +244,26 @@ public class KtxDao {
                 Timestamp.valueOf(next.atStartOfDay()), Date.valueOf(next),
                 Timestamp.valueOf(first.atStartOfDay()), Timestamp.valueOf(next.atStartOfDay()));
         List<Object[]> normalized = new ArrayList<>(rows.size());
-        for (Object[] row : rows) normalized.add(new Object[]{
-                row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7]
-        });
+        try (Connection c = Database.getConnection()) {
+            for (Object[] row : rows) {
+                // Ở một ngày vẫn tính đủ tháng. Chuyển phòng trong tháng lấy đơn giá cao nhất.
+                Object[] stay = ExtensionDao.query(c,
+                        "SELECT COALESCE(MAX(DonGia),0),GROUP_CONCAT(DISTINCT MaPhong ORDER BY MaPhong SEPARATOR ', ') FROM LichSuLuuTru WHERE MaSV=? AND NgayVao<? AND (NgayRa IS NULL OR NgayRa>=?)",
+                        row[0], Date.valueOf(next), Date.valueOf(first)).get(0);
+                BigDecimal rent = (BigDecimal) stay[0];
+                BigDecimal base = new BigDecimal(row[7].toString()).subtract(new BigDecimal(row[3].toString())).add(rent);
+                row[2] = stay[1] == null ? "" : stay[1];
+                row[3] = rent;
+                BigDecimal utility = (BigDecimal) ExtensionDao.query(c,
+                        "SELECT COALESCE(SUM(p.SoTien),0) FROM PhanBoDienNuoc p JOIN DienNuoc d ON d.ID=p.MaDienNuoc WHERE p.MaSV=? AND d.Ky=?",
+                        row[0], Date.valueOf(first)).get(0)[0];
+                BigDecimal fine = (BigDecimal) ExtensionDao.query(c,
+                        "SELECT COALESCE(SUM(TienPhat),0) FROM ViPham WHERE MaSV=? AND NgayViPham>=? AND NgayViPham<?",
+                        row[0], Date.valueOf(first), Date.valueOf(next)).get(0)[0];
+                BigDecimal total = base.add(utility).add(fine);
+                normalized.add(new Object[]{row[0], row[1], row[2], row[3], row[4], row[5], row[6], total, utility, fine});
+            }
+        }
         return normalized;
     }
 

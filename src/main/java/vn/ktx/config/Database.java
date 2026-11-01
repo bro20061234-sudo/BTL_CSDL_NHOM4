@@ -20,6 +20,11 @@ public final class Database {
         } catch (ClassNotFoundException exception) {
             throw new SQLException("Không tìm thấy MySQL Connector/J. Hãy chạy ứng dụng bằng Maven.", exception);
         }
-        return DriverManager.getConnection(url, user, password);
+        java.util.Properties properties = new java.util.Properties();
+        properties.setProperty("user", user);
+        properties.setProperty("password", password);
+        properties.setProperty("connectTimeout", "5000");
+        properties.setProperty("socketTimeout", "15000");
+        return DriverManager.getConnection(url, properties);
     }
 }
