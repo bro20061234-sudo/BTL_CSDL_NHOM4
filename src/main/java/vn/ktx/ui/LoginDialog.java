@@ -36,7 +36,7 @@ public final class LoginDialog {
                     return dao.login(name.getText(),secret);
                 } finally { Arrays.fill(secret,'\0'); password.setText(""); }
             } catch(Exception e) {
-                JOptionPane.showMessageDialog(parent,e.getMessage()+"\nNếu chưa nâng cấp CSDL, chạy migrations/002_extensions.sql trước.","Không thể đăng nhập",JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(parent,e.getMessage()+"\nNếu chưa nâng cấp CSDL, chạy lần lượt 002_extensions.sql và 003_business_updates.sql.","Không thể đăng nhập",JOptionPane.ERROR_MESSAGE);
                 if(JOptionPane.showConfirmDialog(parent,"Thử lại kết nối / đăng nhập?","KTX",JOptionPane.YES_NO_OPTION)!=JOptionPane.YES_OPTION) return null;
             }
         }

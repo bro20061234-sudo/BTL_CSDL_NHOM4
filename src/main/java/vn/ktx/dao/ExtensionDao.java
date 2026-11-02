@@ -21,14 +21,14 @@ public final class ExtensionDao {
                 "Mã, Sinh viên, Phòng, Mô tả, Ảnh, Ngày báo, Trạng thái", true),
         ASSET("Tài sản", "TaiSan", "ID,MaPhong,TenTaiSan,SoLuong,TinhTrang,BienBan,NgayBanGiao",
                 "Mã, Phòng, Tài sản, Số lượng, Tình trạng, Biên bản bàn giao, Ngày bàn giao", false),
-        UTILITY("Điện nước", "DienNuoc", "ID,MaPhong,Ky,DienCu,DienMoi,NuocCu,NuocMoi,GiaDien,GiaNuoc",
-                "Mã, Phòng, Kỳ, Điện cũ, Điện mới, Nước cũ, Nước mới, Giá điện, Giá nước", false),
+        UTILITY("Điện nước", "DienNuoc", "ID,MaPhong,Ky,DienCu,DienMoi,NuocCu,NuocMoi,GiaDien,GiaNuoc,NgayLap",
+                "Mã, Phòng, Tháng sử dụng, Điện cũ, Điện mới, Nước cũ, Nước mới, Giá điện, Giá nước, Ngày lập", false),
         PAYMENT("Thanh toán", "ThanhToan", "ID,MaSV,Ky,SoTien,NgayThanhToan,GhiChu",
-                "Mã biên nhận, Sinh viên, Kỳ, Số tiền, Ngày thanh toán, Ghi chú", false),
+                "Mã biên nhận, Sinh viên, Tháng hóa đơn, Số tiền, Ngày thanh toán, Ghi chú", false),
         NOTICE("Thông báo", "ThongBao", "ID,TieuDe,NoiDung,MaPhong,Han,NgayTao",
                 "Mã, Tiêu đề, Nội dung, Phòng (trống = toàn KTX), Hạn, Ngày tạo", false),
-        VIOLATION("Vi phạm", "ViPham", "ID,MaSV,NgayViPham,NoiDung,XuLy,TienPhat",
-                "Mã, Sinh viên, Ngày vi phạm, Nội dung, Xử lý, Tiền phạt", false);
+        VIOLATION("Vi phạm", "ViPham", "ID,MaSV,NgayViPham,NoiDung,XuLy,TienPhat,HinhThuc",
+                "Mã, Sinh viên, Ngày vi phạm, Nội dung, Ghi chú xử lý, Tiền phạt, Hình thức", false);
         public final String title, table, columns;
         public final String[] headers;
         public final boolean studentCanCreate;
@@ -45,6 +45,9 @@ public final class ExtensionDao {
         return id;
     }
     public List<Object[]> list(Module m) throws SQLException {
+        return list(m,null);
+    }
+    public List<Object[]> list(Module m,LocalDate month) throws SQLException {
         String sql="SELECT "+m.columns+" FROM "+m.table;
         List<Object> args=new ArrayList<>();
         if(!user.isStaff()) {
@@ -53,6 +56,9 @@ public final class ExtensionDao {
             else if(m==Module.UTILITY) sql+=" WHERE ID IN (SELECT MaDienNuoc FROM PhanBoDienNuoc WHERE MaSV=?)";
             else sql+=" WHERE MaSV=?";
             args.add(user.studentId());
+        }
+        if(month!=null && (m==Module.UTILITY || m==Module.PAYMENT)) {
+            sql+=(args.isEmpty()?" WHERE ":" AND ")+"Ky=?"; args.add(month.withDayOfMonth(1));
         }
         try(Connection c=Database.getConnection()) { return query(c,sql+" ORDER BY ID DESC",args.toArray()); }
     }
@@ -67,10 +73,44 @@ public final class ExtensionDao {
             return result;
         }
     }
+    public List<String> assetRooms() throws SQLException {
+        if(user.isStaff()) return rooms();
+        try(Connection c=Database.getConnection()) {
+            List<String> result=new ArrayList<>();
+            for(Object[] row:query(c,"SELECT MaPhong FROM SinhVien WHERE MaSV=? AND MaPhong IS NOT NULL",user.studentId())) result.add(row[0].toString());
+            return result;
+        }
+    }
+    public List<Object[]> assets(String room) throws SQLException {
+        if(room==null || room.isBlank()) return List.of();
+        try(Connection c=Database.getConnection()) {
+            String sql="SELECT "+Module.ASSET.columns+" FROM TaiSan WHERE MaPhong=?";
+            return user.isStaff()?query(c,sql+" ORDER BY ID DESC",room):query(c,sql+" AND MaPhong=(SELECT MaPhong FROM SinhVien WHERE MaSV=?) ORDER BY ID DESC",room,user.studentId());
+        }
+    }
     public List<String> roomTypes() throws SQLException {
         try(Connection c=Database.getConnection()) {
             List<String> result=new ArrayList<>();
             for(Object[] row:query(c,"SELECT DISTINCT LoaiPhong FROM Phong ORDER BY LoaiPhong")) result.add(row[0].toString());
+            return result;
+        }
+    }
+    public record ApplicationRoom(String id,String number,int remaining) {
+        @Override public String toString() { return id+" · Phòng "+number+" · còn "+remaining+" chỗ"; }
+    }
+    public List<ApplicationRoom> applicationRooms(int applicationId) throws SQLException {
+        staff();
+        try(Connection c=Database.getConnection()) {
+            List<Object[]> applications=query(c,"SELECT d.MaSV,d.LoaiPhong,d.TrangThai,s.MaPhong FROM DonDangKy d JOIN SinhVien s ON s.MaSV=d.MaSV WHERE d.ID=?",applicationId);
+            if(applications.isEmpty()) fail("Đơn đăng ký không tồn tại.");
+            Object[] application=applications.get(0);
+            if(!"CHO_DUYET".equals(application[2])) fail("Đơn này đã được xử lý. Hãy chọn đơn đang Chờ duyệt.");
+            ensureEligible(c,application[0].toString());
+            if(application[3]!=null) fail("Sinh viên "+application[0]+" đang ở phòng "+application[3]+". Đăng ký lưu trú chỉ dùng khi chưa có phòng. Nếu muốn đổi phòng, hãy dùng tab Chuyển phòng; đơn này có thể Từ chối.");
+            List<ApplicationRoom> result=new ArrayList<>();
+            for(Object[] room:query(c,"SELECT p.MaPhong,p.SoPhong,p.SoNguoiToiDa-(SELECT COUNT(*) FROM SinhVien s WHERE s.MaPhong=p.MaPhong) AS ConCho FROM Phong p WHERE p.LoaiPhong=? AND p.SoNguoiToiDa>(SELECT COUNT(*) FROM SinhVien s WHERE s.MaPhong=p.MaPhong) ORDER BY p.SoPhong,p.MaPhong",application[1]))
+                result.add(new ApplicationRoom(room[0].toString(),room[1].toString(),((Number)room[2]).intValue()));
+            if(result.isEmpty()) fail("Không có phòng loại '"+application[1]+"' còn chỗ. Hãy thêm phòng đúng loại hoặc giải phóng chỗ, rồi làm mới và duyệt lại.");
             return result;
         }
     }
@@ -83,6 +123,7 @@ public final class ExtensionDao {
                 switch(m) {
                     case APPLICATION -> {
                         lockStudent(c,sv);
+                        ensureEligible(c,sv);
                         if(!query(c,"SELECT ID FROM DonDangKy WHERE MaSV=? AND TrangThai='CHO_DUYET'",sv).isEmpty()) fail("Đã có đơn đang chờ duyệt.");
                         if(query(c,"SELECT MaPhong FROM Phong WHERE LoaiPhong=?",required(v,"LoaiPhong")).isEmpty()) fail("Loại phòng không tồn tại.");
                         update(c,"INSERT INTO DonDangKy(MaSV,LoaiPhong,NgayGui,GhiChu) VALUES (?,?,CURRENT_DATE,?)",sv,v.get("LoaiPhong"),v.getOrDefault("GhiChu",""));
@@ -97,6 +138,7 @@ public final class ExtensionDao {
                     }
                     case TRANSFER -> {
                         Object[] student=lockStudent(c,sv);
+                        ensureEligible(c,sv);
                         String target=required(v,"PhongMoi");
                         if(student[0]==null || target.equals(student[0])) fail("Cần đang ở KTX và chọn phòng khác phòng hiện tại.");
                         if(!query(c,"SELECT ID FROM ChuyenPhong WHERE MaSV=? AND TrangThai='CHO_DUYET'",sv).isEmpty()) fail("Đã có yêu cầu chuyển phòng chờ duyệt.");
@@ -114,15 +156,36 @@ public final class ExtensionDao {
                     case UTILITY -> utility(c,v);
                     case PAYMENT -> {
                         lockStudent(c,sv);
-                        LocalDate period=period(v); BigDecimal amount=money(v,"SoTien",true);
+                        LocalDate period=period(v);
                         BigDecimal debt=balance(c,sv,period)[2];
+                        String mode=v.getOrDefault("CheDo","PARTIAL");
+                        if(!Set.of("FULL","PARTIAL").contains(mode)) fail("Hình thức thanh toán không hợp lệ.");
+                        if(debt.signum()<=0) fail("Sinh viên không còn công nợ trong tháng đã chọn.");
+                        BigDecimal amount=mode.equals("FULL")?debt:money(v,"SoTien",true);
                         if(amount.compareTo(debt)>0) fail("Số tiền vượt công nợ còn lại: "+debt);
                         update(c,"INSERT INTO ThanhToan(MaSV,Ky,SoTien,GhiChu) VALUES (?,?,?,?)",sv,period,amount,v.getOrDefault("GhiChu",""));
                     }
                     case NOTICE -> update(c,"INSERT INTO ThongBao(TieuDe,NoiDung,MaPhong,Han) VALUES (?,?,?,?)",required(v,"TieuDe"),required(v,"NoiDung"),blank(v.get("MaPhong")),date(v,"Han"));
                     case VIOLATION -> {
                         lockStudent(c,sv);
-                        update(c,"INSERT INTO ViPham(MaSV,NgayViPham,NoiDung,XuLy,TienPhat) VALUES (?,?,?,?,?)",sv,date(v,"NgayViPham"),required(v,"NoiDung"),required(v,"XuLy"),money(v,"TienPhat",false));
+                        String kind=v.getOrDefault("HinhThuc", "Nhắc nhở".equals(v.get("XuLy"))?"NHAC_NHO":"HANH_CHINH");
+                        if(!Set.of("NHAC_NHO","HANH_CHINH","DINH_CHI").contains(kind)) fail("Hình thức xử lý không hợp lệ.");
+                        BigDecimal fine=money(v,"TienPhat",false);
+                        if(!kind.equals("HANH_CHINH") && fine.signum()!=0) fail("Chỉ hình thức hành chính được nhập tiền phạt.");
+                        if(kind.equals("HANH_CHINH") && fine.signum()<=0) fail("Phạt hành chính cần số tiền lớn hơn 0.");
+                        LocalDate incident=date(v,"NgayViPham");
+                        if(incident.isAfter(LocalDate.now())) fail("Ngày vi phạm không được ở tương lai.");
+                        if(kind.equals("DINH_CHI")) ensureEligible(c,sv);
+                        update(c,"INSERT INTO ViPham(MaSV,NgayViPham,NoiDung,XuLy,TienPhat,HinhThuc) VALUES (?,?,?,?,?,?)",sv,incident,required(v,"NoiDung"),v.getOrDefault("XuLy",""),fine,kind);
+                        if(kind.equals("DINH_CHI")) {
+                            int violation=((Number)query(c,"SELECT LAST_INSERT_ID()").get(0)[0]).intValue();
+                            update(c,"INSERT INTO DinhChiLuuTru(MaSV,MaViPham,Ngay) VALUES (?,?,CURRENT_DATE)",sv,violation);
+                            update(c,"UPDATE SinhVien SET MaPhong=NULL WHERE MaSV=?",sv);
+                            update(c,"UPDATE HopDong SET TrangThai='DINH_CHI' WHERE MaSV=? AND TrangThai='HIEU_LUC'",sv);
+                            update(c,"UPDATE XeVeThang SET NgayKetThuc=CURRENT_DATE WHERE MaSV=? AND NgayKetThuc IS NULL",sv);
+                            update(c,"UPDATE DonDangKy SET TrangThai='TU_CHOI',GhiChu=CONCAT(GhiChu,' [Đình chỉ lưu trú]') WHERE MaSV=? AND TrangThai='CHO_DUYET'",sv);
+                            update(c,"UPDATE ChuyenPhong SET TrangThai='TU_CHOI' WHERE MaSV=? AND TrangThai='CHO_DUYET'",sv);
+                        }
                     }
                 }
                 c.commit();
@@ -135,10 +198,13 @@ public final class ExtensionDao {
         BigDecimal oldE=money(v,"DienCu",false),newE=money(v,"DienMoi",false),oldW=money(v,"NuocCu",false),newW=money(v,"NuocMoi",false);
         if(newE.compareTo(oldE)<0 || newW.compareTo(oldW)<0) fail("Chỉ số mới không được nhỏ hơn chỉ số cũ.");
         BigDecimal priceE=money(v,"GiaDien",false),priceW=money(v,"GiaNuoc",false);
-        LocalDate period=period(v);
-        List<Object[]> residents=query(c,"SELECT MaSV FROM SinhVien WHERE MaPhong=? AND NgayVaoKTX<? ORDER BY MaSV FOR UPDATE",room,period.plusMonths(1));
+        LocalDate issued=v.containsKey("NgayLap")?date(v,"NgayLap"):LocalDate.now();
+        if(issued.isAfter(LocalDate.now())) fail("Ngày lập không được ở tương lai.");
+        LocalDate period=v.containsKey("Ky")?period(v):issued.minusMonths(1).withDayOfMonth(1);
+        if(!period.isBefore(issued.withDayOfMonth(1))) fail("Chỉ lập điện nước cho tháng đã kết thúc. Ngày 01 lập tiền của tháng trước.");
+        List<Object[]> residents=query(c,"SELECT s.MaSV FROM SinhVien s WHERE EXISTS (SELECT 1 FROM LichSuLuuTru l WHERE l.MaSV=s.MaSV AND l.MaPhong=? AND l.NgayVao<? AND (l.NgayRa IS NULL OR l.NgayRa>=?)) ORDER BY s.MaSV FOR UPDATE",room,period.plusMonths(1),period);
         if(residents.isEmpty()) fail("Phòng không có sinh viên để phân bổ.");
-        update(c,"INSERT INTO DienNuoc(MaPhong,Ky,DienCu,DienMoi,NuocCu,NuocMoi,GiaDien,GiaNuoc) VALUES (?,?,?,?,?,?,?,?)",room,period,oldE,newE,oldW,newW,priceE,priceW);
+        update(c,"INSERT INTO DienNuoc(MaPhong,Ky,DienCu,DienMoi,NuocCu,NuocMoi,GiaDien,GiaNuoc,NgayLap) VALUES (?,?,?,?,?,?,?,?,?)",room,period,oldE,newE,oldW,newW,priceE,priceW,issued);
         int id=((Number)query(c,"SELECT LAST_INSERT_ID()").get(0)[0]).intValue();
         BigDecimal total=newE.subtract(oldE).multiply(priceE).add(newW.subtract(oldW).multiply(priceW)).setScale(2,RoundingMode.HALF_UP);
         BigDecimal share=total.divide(BigDecimal.valueOf(residents.size()),2,RoundingMode.DOWN),remaining=total;
@@ -205,11 +271,19 @@ public final class ExtensionDao {
         if(rows.isEmpty()) fail("Sinh viên không tồn tại."); return rows.get(0);
     }
     private void assign(Connection c,String student,String room) throws SQLException {
+        ensureEligible(c,student);
         List<Object[]> rooms=query(c,"SELECT SoNguoiToiDa FROM Phong WHERE MaPhong=? FOR UPDATE",room);
         if(rooms.isEmpty()) fail("Phòng không tồn tại.");
         int count=((Number)query(c,"SELECT COUNT(*) FROM SinhVien WHERE MaPhong=? AND MaSV<>?",room,student).get(0)[0]).intValue();
         if(count>=((Number)rooms.get(0)[0]).intValue()) fail("Phòng đã đủ số người tối đa.");
         update(c,"UPDATE SinhVien SET MaPhong=? WHERE MaSV=?",room,student);
+    }
+    private void ensureEligible(Connection c,String student) throws SQLException {
+        if(!query(c,"SELECT MaSV FROM DinhChiLuuTru WHERE MaSV=?",student).isEmpty()) fail("Sinh viên đã đình chỉ lưu trú, không được đăng ký hoặc xếp phòng lại.");
+    }
+    public BigDecimal remaining(String student,LocalDate month) throws SQLException {
+        owner(student);
+        try(Connection c=Database.getConnection()) { return balance(c,student,month.withDayOfMonth(1))[2]; }
     }
     public List<Object[]> debts(LocalDate period) throws SQLException {
         List<Object[]> result=new ArrayList<>();

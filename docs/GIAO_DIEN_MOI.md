@@ -4,7 +4,7 @@ Giao diện desktop đã được đổi theo bản thiết kế xem trước: m
 
 ## Cách chạy
 
-Đóng cửa sổ ứng dụng cũ rồi chạy `./run.ps1` trong thư mục chứa `pom.xml`, hoặc chạy lại `mvn compile exec:java`/chạy lớp `vn.ktx.Main` trong IDE. Không cần chạy thêm SQL nếu trước đó đã nâng cấp bằng `migrations/002_extensions.sql`.
+Đóng cửa sổ ứng dụng cũ rồi chạy `./run.ps1` trong thư mục chứa `pom.xml`, hoặc chạy lại `mvn compile exec:java`/chạy lớp `vn.ktx.Main` trong IDE. Bản hiện tại cần chạy thêm `003_business_updates.sql` nếu trước đó mới nâng cấp 002.
 
 ## Điều hướng
 
@@ -26,7 +26,7 @@ Tìm kiếm/lọc chỉ thay đổi danh sách hiển thị. Việc chỉnh sử
 
 - Nút tạo mới được ghi rõ nghiệp vụ: Lập hợp đồng, Báo hỏng, Lập phí điện nước, Ghi nhận thanh toán…
 - Chọn **Xem chi tiết** để đọc đầy đủ mô tả dài, nội dung thông báo hoặc biên bản.
-- Ngày trong bảng hiển thị `dd/MM/yyyy`; biểu mẫu nghiệp vụ có lịch chọn ngày. Riêng ô nhập kỳ trên màn hình công nợ vẫn dùng `yyyy-MM-01` như nhãn hướng dẫn.
+- Ngày trong bảng hiển thị `dd/MM/yyyy`; biểu mẫu nghiệp vụ có lịch chọn ngày. Điện nước, công nợ và thanh toán đều có bộ chọn tháng/năm, không cần nhập ngày đầu tháng.
 - Tiền hiển thị có dấu phân cách hàng nghìn; khi nhập số tiền không gõ dấu phân cách. Nhấp tiêu đề cột để sắp xếp; cột tiền được sắp theo giá trị số.
 - Dữ liệu bảng và thẻ tổng quan được tải ở luồng nền; cửa sổ vẫn có thể thao tác trong lúc tải. Bảng trống phân biệt trạng thái đang tải và chưa có dữ liệu.
 - Nhấn Làm mới hoặc mở lại mục để lấy thay đổi từ CSDL. Giao diện chỉ hiển thị dữ liệu và chức năng đúng vai trò đã đăng nhập.

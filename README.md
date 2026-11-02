@@ -1,10 +1,14 @@
 # Quản lý Ký túc xá Sinh viên
 
-**Giao diện mới:** menu bên trái, tìm kiếm/lọc sinh viên, bảng dễ đọc và cổng sinh viên riêng. Xem [hướng dẫn giao diện mới](docs/GIAO_DIEN_MOI.md). Khởi động lại ứng dụng bằng `./run.ps1` để dùng bản mới; không cần nâng cấp SQL thêm nếu đã chạy migration 002.
+**Bãi đỗ xe và tài sản:** chọn phòng để xem riêng tài sản; quầy gửi/lấy xe chung cho vé tháng và vé lượt dùng giờ thực tế, không nhập giờ vào/ra. Xem [hướng dẫn mới](docs/BAI_DO_XE_VA_TAI_SAN.md). Bản này không thêm SQL nếu đã nâng cấp 003.
+
+**Cập nhật nghiệp vụ 003:** mẫu phòng 4–2–2 người và tài sản mặc định, vé xe theo khung ngày/đêm, điện nước theo tháng sử dụng, thanh toán toàn bộ/một phần và ba mức vi phạm. **CSDL đang dùng cần chạy thêm [003_business_updates.sql](003_business_updates.sql)** rồi khởi động lại ứng dụng. Xem [hướng dẫn chi tiết](docs/CAP_NHAT_NGHIEP_VU_003.md).
+
+**Giao diện mới:** menu bên trái, tìm kiếm/lọc sinh viên, bảng dễ đọc và cổng sinh viên riêng. Xem [hướng dẫn giao diện mới](docs/GIAO_DIEN_MOI.md). Khởi động lại ứng dụng bằng `./run.ps1` để dùng bản mới; cần chạy migration 003 cho phiên bản hiện tại.
 
 Đã bổ sung **10 tính năng mở rộng**: đăng nhập/phân quyền, đơn đăng ký lưu trú, hợp đồng, chuyển phòng, sửa chữa, tài sản, điện nước, công nợ/thanh toán, thông báo/nhắc hạn và vi phạm. Xem [hướng dẫn cài đặt và demo](docs/TINH_NANG_MO_RONG.md).
 
-**Nâng cấp CSDL hiện có:** chạy thêm `migrations/002_extensions.sql` trước khi mở phiên bản mới. Cài mới thì chạy `datasinhvien.sql` rồi script nâng cấp. Lần đầu mở ứng dụng sẽ yêu cầu tạo tài khoản quản trị viên.
+**Nâng cấp CSDL hiện có:** nếu đã dùng bản mở rộng 002, chỉ chạy thêm `003_business_updates.sql`. Cài mới thì chạy `datasinhvien.sql`, `002_extensions.sql` rồi `003_business_updates.sql`. Lần đầu mở ứng dụng sẽ yêu cầu tạo tài khoản quản trị viên.
 
 Ứng dụng desktop Java Swing theo DAO pattern, dùng JDBC để thao tác với MySQL. Giao diện có các màn hình quản lý sinh viên, phòng, dịch vụ, lượt sử dụng dịch vụ, xe vé tháng, khách đến thăm, hóa đơn theo tháng và báo cáo.
 

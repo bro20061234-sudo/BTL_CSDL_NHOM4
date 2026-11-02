@@ -3,6 +3,7 @@ package vn.ktx.ui;
 import com.toedter.calendar.JDateChooser;
 import vn.ktx.dao.KtxDao;
 import vn.ktx.model.Student;
+import vn.ktx.model.RoomType;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -19,7 +20,6 @@ import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SpinnerNumberModel;
-import javax.swing.SwingConstants;
 import javax.swing.table.DefaultTableModel;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
@@ -44,7 +44,6 @@ public class MainFrame extends JFrame {
     private final JTable serviceTable = new DataTable();
     private final JTable usageTable = new DataTable();
     private final JTable vehicleTable = new DataTable();
-    private final JTable parkingTable = new DataTable();
     private final JTable guestTable = new DataTable();
     private final JTable invoiceTable = new DataTable();
     private final JTextField studentSearch = new JTextField(22);
@@ -73,7 +72,7 @@ public class MainFrame extends JFrame {
         workspace.page("students", "Sinh viên", "Quản lý sinh viên", "Tra cứu hồ sơ và quản lý thông tin lưu trú.", this::studentPanel);
         workspace.page("rooms", "Phòng ở", "Quản lý phòng ở", "Giá thuê, sức chứa và số sinh viên đang ở trong từng phòng.", this::roomPanel);
         workspace.page("contracts", "Hợp đồng", "Hợp đồng lưu trú", "Lập hợp đồng, gia hạn thời gian ở và thanh lý khi trả phòng.", () -> extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.CONTRACT));
-        workspace.page("services", "Dịch vụ & gửi xe", "Dịch vụ & gửi xe", "Danh mục dịch vụ, lượt sử dụng và quản lý xe vé tháng.", () -> WorkspacePanel.tabs(new String[]{"Danh mục dịch vụ", "Sử dụng dịch vụ", "Xe vé tháng", "Nhật ký gửi xe"}, servicePanel(), usagePanel(), vehiclePanel(), parkingPanel()));
+        workspace.page("services", "Dịch vụ & gửi xe", "Dịch vụ & gửi xe", "Dịch vụ, đăng ký vé tháng và quầy gửi/lấy xe theo thời gian thực.", () -> WorkspacePanel.tabs(new String[]{"Danh mục dịch vụ", "Sử dụng dịch vụ", "Xe vé tháng", "Bãi đỗ xe"}, servicePanel(), usagePanel(), vehiclePanel(), parkingPanel()));
         workspace.page("guests", "Khách đến thăm", "Khách đến thăm", "Ghi nhận thông tin khách và sinh viên được thăm.", this::guestPanel);
         workspace.group("Yêu cầu");
         workspace.page("requests", "Đăng ký & chuyển phòng", "Đăng ký & chuyển phòng", "Duyệt đơn lưu trú, kiểm tra chỗ trống và xử lý chuyển phòng.", () -> WorkspacePanel.tabs(new String[]{"Đăng ký lưu trú", "Chuyển phòng"}, extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.APPLICATION), extensions.modulePanel(vn.ktx.dao.ExtensionDao.Module.TRANSFER)));
@@ -245,7 +244,7 @@ public class MainFrame extends JFrame {
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Sử dụng dịch vụ", usagePanel());
         tabs.addTab("Xe vé tháng", vehiclePanel());
-        tabs.addTab("Nhật ký gửi xe", parkingPanel());
+        tabs.addTab("Bãi đỗ xe", parkingPanel());
         tabs.addTab("Khách đến thăm", guestPanel());
         return wrap(tabs);
     }
@@ -306,22 +305,7 @@ public class MainFrame extends JFrame {
     }
 
     private JPanel parkingPanel() {
-        JPanel panel = new JPanel(new BorderLayout(8, 8));
-        JPanel actions = actionBar();
-        JButton add = button("Ghi nhận lượt gửi");
-        JButton delete = button("Xóa lượt");
-        JButton refresh = button("Làm mới");
-        actions.add(add);
-        actions.add(delete);
-        actions.add(refresh);
-        panel.add(actions, BorderLayout.NORTH);
-        panel.add(new JScrollPane(parkingTable), BorderLayout.CENTER);
-        add.addActionListener(e -> parkingForm());
-        delete.addActionListener(e -> deleteSelected(parkingTable, "lượt gửi xe",
-                row -> dao.deleteParkingLog(number(row[0]))));
-        refresh.addActionListener(e -> refreshParkingLogs());
-        onShow(panel, this::refreshParkingLogs);
-        return panel;
+        return new ParkingPanel();
     }
 
     private JPanel invoicePanel() {
@@ -462,12 +446,24 @@ public class MainFrame extends JFrame {
         JTextField id = field(existing == null ? "" : text(existing[0]));
         id.setEditable(insert);
         JTextField number = field(existing == null ? "" : text(existing[1]));
-        JTextField type = field(existing == null ? "" : text(existing[2]));
-        JTextField price = field(existing == null ? "" : text(existing[3]));
-        JTextField capacity = field(existing == null ? "" : text(existing[4]));
+        JComboBox<Object> type = new JComboBox<>(RoomType.values());
+        if(existing!=null) {
+            RoomType matched=RoomType.find(text(existing[2]));
+            if(matched!=null) type.setSelectedItem(matched);
+            else { type.addItem(existing[2]); type.setSelectedItem(existing[2]); }
+        }
+        JTextField price = field(existing == null ? RoomType.STANDARD.price().toPlainString() : text(existing[3]));
+        JTextField capacity = field(existing == null ? "4" : text(existing[4])); capacity.setEditable(false);
+        JTextArea assets = new JTextArea(3,28); assets.setEditable(false); assets.setLineWrap(true); assets.setWrapStyleWord(true); assets.setBackground(UiTheme.CANVAS);
+        Runnable showTemplate=()-> {
+            if(type.getSelectedItem() instanceof RoomType selected) { capacity.setText(Integer.toString(selected.capacity())); assets.setText(selected.description()); }
+            else assets.setText("Phòng cũ: giữ nguyên tài sản hiện có. Chọn một trong ba mẫu nếu muốn chuyển loại.");
+        };
+        showTemplate.run();
+        type.addActionListener(e -> { showTemplate.run(); if(type.getSelectedItem() instanceof RoomType selected) price.setText(selected.price().toPlainString()); });
         if (!confirmForm("Thông tin phòng", new Object[]{"Mã phòng:", id, "Số phòng:", number, "Loại phòng:", type,
-                "Đơn giá/tháng:", price, "Sức chứa tối đa:", capacity})) return;
-        if (required(id, number, type, price, capacity)) {
+                "Đơn giá/tháng (có thể chỉnh):", price, "Sức chứa tự động:", capacity, "Tài sản mặc định:", new JScrollPane(assets)})) return;
+        if (required(id, number, price, capacity)) {
             error("Vui lòng nhập đầy đủ thông tin phòng.");
             return;
         }
@@ -475,7 +471,7 @@ public class MainFrame extends JFrame {
             BigDecimal amount = new BigDecimal(price.getText().trim());
             int max = Integer.parseInt(capacity.getText().trim());
             runAction(() -> {
-                dao.saveRoom(id.getText().trim(), number.getText().trim(), type.getText().trim(), amount, max, insert);
+                dao.saveRoom(id.getText().trim(), number.getText().trim(), type.getSelectedItem().toString(), amount, max, insert);
                 refreshRooms();
                 info("Đã lưu thông tin phòng.");
             });
@@ -579,38 +575,6 @@ public class MainFrame extends JFrame {
         });
     }
 
-    private void parkingForm() {
-        JComboBox<VehicleChoice> vehicle = new JComboBox<>();
-        try {
-            for (Object[] row : dao.getVehicleChoices()) {
-                vehicle.addItem(new VehicleChoice(number(row[0]), text(row[1]), text(row[2])));
-            }
-        } catch (SQLException exception) {
-            showError(exception);
-            return;
-        }
-        if (vehicle.getItemCount() == 0) {
-            error("Cần đăng ký xe vé tháng trước khi ghi nhận lượt gửi.");
-            return;
-        }
-        JDateChooser date = dateChooser(LocalDate.now());
-        JTextField time = field(java.time.LocalTime.now().withSecond(0).toString());
-        if (!confirmForm("Ghi nhận lượt gửi xe", new Object[]{"Xe (mã - biển số - sinh viên):", vehicle,
-                "Ngày gửi:", date, "Giờ gửi (HH:mm):", time})) return;
-        try {
-            LocalDateTime sentAt = LocalDateTime.of(dateFrom(date), java.time.LocalTime.parse(time.getText().trim()));
-            VehicleChoice selected = (VehicleChoice) vehicle.getSelectedItem();
-            runAction(() -> {
-                dao.addParkingLog(selected.id(), sentAt);
-                refreshParkingLogs();
-                refreshInvoices();
-                info("Đã ghi nhận lượt gửi xe. Phí phát sinh (nếu có) do MySQL trigger tự tính.");
-            });
-        } catch (RuntimeException exception) {
-            error("Ngày hoặc giờ không hợp lệ. Giờ nhập theo dạng HH:mm.");
-        }
-    }
-
     private JComboBox<String> studentChoices() {
         JComboBox<String> choice = new JComboBox<>();
         try {
@@ -644,7 +608,6 @@ public class MainFrame extends JFrame {
         refreshServices();
         refreshUsages();
         refreshVehicles();
-        refreshParkingLogs();
         refreshGuests();
     }
 
@@ -652,7 +615,6 @@ public class MainFrame extends JFrame {
     private void refreshServices() { load(serviceTable, KtxDao.SERVICE_COLUMNS, dao::getServices); }
     private void refreshUsages() { load(usageTable, KtxDao.USAGE_COLUMNS, dao::getUsages); }
     private void refreshVehicles() { load(vehicleTable, KtxDao.VEHICLE_COLUMNS, dao::getVehicles); }
-    private void refreshParkingLogs() { load(parkingTable, KtxDao.PARKING_COLUMNS, dao::getParkingLogs); }
     private void refreshGuests() { load(guestTable, KtxDao.GUEST_COLUMNS, dao::getGuests); }
 
     private void refreshInvoices() {
@@ -743,7 +705,7 @@ public class MainFrame extends JFrame {
                     if(table==studentTable) { headers=java.util.Arrays.copyOf(columns,columns.length+1); headers[columns.length]="Trạng thái"; }
                     DefaultTableModel model=new ReadOnlyTableModel(headers);
                     for(Object[] row:data) {
-                        if(table==studentTable) { Object[] extended=java.util.Arrays.copyOf(row,row.length+1); extended[row.length]=row[6]==null || row[6].toString().isBlank()?"Chờ xếp phòng":"Đang ở"; model.addRow(extended); }
+                        if(table==studentTable) { Object[] extended=java.util.Arrays.copyOf(row,9); extended[8]=row.length>8?row[8]:row[6]==null || row[6].toString().isBlank()?"Chờ xếp phòng":"Đang ở"; model.addRow(extended); }
                         else model.addRow(row);
                     }
                     table.setModel(model); table.setAutoCreateRowSorter(true); UiTheme.styleTable(table);
@@ -895,10 +857,4 @@ public class MainFrame extends JFrame {
         void run(Object[] row) throws SQLException;
     }
 
-    private record VehicleChoice(int id, String plate, String studentId) {
-        @Override
-        public String toString() {
-            return id + " - " + plate + " (" + studentId + ")";
-        }
-    }
 }

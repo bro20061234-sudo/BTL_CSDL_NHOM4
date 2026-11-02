@@ -60,7 +60,7 @@ public final class UiTheme {
         }
         else if(component instanceof JTable t) styleTable(t);
         else if(component instanceof JTextArea a) { a.setLineWrap(true); a.setWrapStyleWord(true); }
-        else if(component instanceof JComboBox<?> c) { c.setPreferredSize(new Dimension(Math.max(140,c.getPreferredSize().width),38)); c.setMaximumRowCount(12); }
+        else if(component instanceof JComboBox<?> c) { if(!(c.getParent() instanceof MonthPicker)) c.setPreferredSize(new Dimension(Math.max(140,c.getPreferredSize().width),38)); c.setMaximumRowCount(12); }
         if(component instanceof Container container) for(Component c:container.getComponents()) decorate(c);
     }
     public static void styleTable(JTable t) {
@@ -81,7 +81,8 @@ public final class UiTheme {
         return Map.ofEntries(Map.entry("CHO_DUYET","Chờ duyệt"),Map.entry("DA_DUYET","Đã duyệt"),Map.entry("TU_CHOI","Từ chối"),
                 Map.entry("HIEU_LUC","Hiệu lực"),Map.entry("DA_THANH_LY","Đã thanh lý"),Map.entry("TIEP_NHAN","Tiếp nhận"),
                 Map.entry("DANG_XU_LY","Đang xử lý"),Map.entry("HOAN_THANH","Hoàn thành"),Map.entry("ADMIN","Quản trị viên"),
-                Map.entry("STAFF","Nhân viên"),Map.entry("STUDENT","Sinh viên")).getOrDefault(raw,raw);
+                Map.entry("STAFF","Nhân viên"),Map.entry("STUDENT","Sinh viên"),Map.entry("FULL","Thanh toán toàn bộ"),Map.entry("PARTIAL","Thanh toán một phần"),
+                Map.entry("NHAC_NHO","Nhắc nhở"),Map.entry("HANH_CHINH","Phạt hành chính"),Map.entry("DINH_CHI","Đình chỉ lưu trú")).getOrDefault(raw,raw);
     }
     public static class CellRenderer extends DefaultTableCellRenderer {
         @Override public Component getTableCellRendererComponent(JTable table,Object value,boolean selected,boolean focus,int row,int column) {
@@ -91,10 +92,14 @@ public final class UiTheme {
             else if(value instanceof java.sql.Timestamp d) display=d.toLocalDateTime().format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"));
             else if(value instanceof java.time.LocalDate d) display=d.format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy"));
             else if(value instanceof java.math.BigDecimal n) display=NumberFormat.getNumberInstance(Locale.forLanguageTag("vi-VN")).format(n);
+            if(table.getColumnName(column).startsWith("Tháng")) {
+                if(value instanceof java.sql.Date d) display=d.toLocalDate().format(java.time.format.DateTimeFormatter.ofPattern("MM/yyyy"));
+                else if(value instanceof java.time.LocalDate d) display=d.format(java.time.format.DateTimeFormatter.ofPattern("MM/yyyy"));
+            }
             setText(display); setToolTipText(display); setBorder(new EmptyBorder(0,12,0,12));
             setBackground(selected?SELECTED:row%2==0?WHITE:new Color(250,251,253)); setForeground(INK);
             if(!raw.equals(status(raw))) {
-                setForeground(raw.equals("TU_CHOI")?RED:raw.equals("CHO_DUYET") || raw.equals("DANG_XU_LY")?new Color(160,105,15):GREEN);
+                setForeground(raw.equals("TU_CHOI") || raw.equals("DINH_CHI")?RED:raw.equals("CHO_DUYET") || raw.equals("DANG_XU_LY")?new Color(160,105,15):GREEN);
                 setFont(FONT.deriveFont(Font.BOLD,13));
             } else setFont(FONT.deriveFont(16f));
             setHorizontalAlignment(value instanceof Number?SwingConstants.RIGHT:SwingConstants.LEFT);
@@ -107,7 +112,7 @@ public final class UiTheme {
             super.getTableCellRendererComponent(table,value,selected,false,row,column);
             String raw=value==null?"":value.toString(),text=status(raw);
             boolean warning=java.util.Set.of("CHO_DUYET","DANG_XU_LY","TIEP_NHAN","Chờ xếp phòng").contains(raw);
-            boolean rejected=raw.equals("TU_CHOI"),closed=raw.equals("DA_THANH_LY");
+            boolean rejected=raw.equals("TU_CHOI") || raw.equals("DINH_CHI") || raw.equals("Đình chỉ lưu trú"),closed=raw.equals("DA_THANH_LY");
             Color foreground=rejected?RED:closed?MUTED:warning?new Color(151,98,14):GREEN;
             pillBackground=rejected?new Color(255,235,238):closed?CANVAS:warning?new Color(255,244,215):new Color(224,247,234);
             rowBackground=selected?SELECTED:row%2==0?WHITE:new Color(250,251,253);

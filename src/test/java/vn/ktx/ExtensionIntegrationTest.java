@@ -37,9 +37,11 @@ public final class ExtensionIntegrationTest {
         execute("INSERT INTO SinhVien VALUES ('TESTSV','999999999991','Test Student','2003-01-01','TEST','Test',NULL,'2026-10-01')");
         staff.create(Module.APPLICATION,map("MaSV","TESTSV","LoaiPhong","Test","GhiChu","Đăng ký"));
         int application=last(staff,Module.APPLICATION);
+        check(staff.applicationRooms(application).size()==2,"Chỉ gợi ý phòng đúng loại còn chỗ");
         staff.transition(Module.APPLICATION,application,"APPROVE","T001");
         check("T001".equals(scalar("SELECT MaPhong FROM SinhVien WHERE MaSV='TESTSV'")),"Duyệt đơn xếp phòng");
         reject(()->staff.transition(Module.APPLICATION,application,"APPROVE","T001"),"Không duyệt hai lần");
+        reject(()->staff.applicationRooms(application),"Không mở xếp phòng cho đơn đã xử lý");
         staff.create(Module.CONTRACT,map("MaSV","TESTSV","MaPhong","T001","NgayBatDau","2026-10-01","NgayKetThuc","2026-12-31","TienCoc","500000"));
         int contract=last(staff,Module.CONTRACT);
         staff.transition(Module.CONTRACT,contract,"RENEW","2027-06-30");
@@ -65,6 +67,8 @@ public final class ExtensionIntegrationTest {
         staff.create(Module.ASSET,map("MaPhong","T002","TenTaiSan","Quạt","SoLuong","2","TinhTrang","Tốt","BienBan","BB001","NgayBanGiao","2026-10-01"));
         staff.transition(Module.ASSET,last(staff,Module.ASSET),"STATUS","Hỏng 1 chiếc");
         check(self.list(Module.ASSET).size()==1,"Sinh viên xem tài sản phòng mình");
+        execute("UPDATE LichSuLuuTru SET NgayVao='2026-10-01' WHERE MaSV='SV001' AND MaPhong='T002'");
+        execute("UPDATE LichSuLuuTru SET NgayRa='2026-09-30' WHERE MaSV='SV001' AND MaPhong='P101'");
         staff.create(Module.UTILITY,map("MaPhong","T002","Ky","2026-10-01","DienCu","10","DienMoi","20","NuocCu","0","NuocMoi","2","GiaDien","3000","GiaNuoc","15000"));
         check(new BigDecimal("60000").compareTo((BigDecimal)scalar("SELECT SUM(SoTien) FROM PhanBoDienNuoc WHERE MaSV='SV001'"))==0,"Phân bổ điện nước");
         reject(()->staff.create(Module.UTILITY,map("MaPhong","T002","Ky","2026-10-01","DienCu","10","DienMoi","20","NuocCu","0","NuocMoi","2","GiaDien","3000","GiaNuoc","15000")),"Chặn trùng kỳ điện nước");
@@ -90,8 +94,9 @@ public final class ExtensionIntegrationTest {
         staff.transition(Module.TRANSFER,last(staff,Module.TRANSFER),"APPROVE",null);
         check("T002".equals(scalar("SELECT MaPhong FROM HopDong WHERE ID="+contract)),"Chuyển phòng cập nhật hợp đồng");
         check(new BigDecimal("60000").compareTo((BigDecimal)scalar("SELECT SUM(SoTien) FROM PhanBoDienNuoc WHERE MaSV='SV001'"))==0,"Chuyển phòng không chia lại phí đã chốt");
-        staff.create(Module.UTILITY,map("MaPhong","T002","Ky","2026-12-01","DienCu","0","DienMoi","1","NuocCu","0","NuocMoi","0","GiaDien","1.01","GiaNuoc","0"));
-        check(new BigDecimal("1.01").compareTo((BigDecimal)scalar("SELECT SUM(p.SoTien) FROM PhanBoDienNuoc p JOIN DienNuoc d ON d.ID=p.MaDienNuoc WHERE d.Ky='2026-12-01'"))==0,"Phân bổ số lẻ không mất tiền");
+        execute("UPDATE LichSuLuuTru SET NgayVao='2026-09-01' WHERE MaPhong='T002'");
+        staff.create(Module.UTILITY,map("MaPhong","T002","Ky","2026-09-01","NgayLap","2026-10-01","DienCu","0","DienMoi","1","NuocCu","0","NuocMoi","0","GiaDien","1.01","GiaNuoc","0"));
+        check(new BigDecimal("1.01").compareTo((BigDecimal)scalar("SELECT SUM(p.SoTien) FROM PhanBoDienNuoc p JOIN DienNuoc d ON d.ID=p.MaDienNuoc WHERE d.Ky='2026-09-01'"))==0,"Phân bổ số lẻ không mất tiền");
         LocalDate current=LocalDate.now().withDayOfMonth(1);
         BigDecimal rentBefore=(BigDecimal)new KtxDao().getInvoices(current.getMonthValue(),current.getYear()).stream().filter(r->r[0].equals("TESTSV")).findFirst().orElseThrow()[3];
         staff.transition(Module.CONTRACT,contract,"CLOSE",null);

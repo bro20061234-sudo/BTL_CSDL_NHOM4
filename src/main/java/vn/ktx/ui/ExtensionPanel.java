@@ -6,7 +6,6 @@ import vn.ktx.dao.ExtensionDao.Module;
 import vn.ktx.dao.KtxDao;
 import vn.ktx.model.UserSession;
 import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -46,9 +45,38 @@ public final class ExtensionPanel extends JPanel {
         run(()-> { pendingStudent=studentId; try { if(form(Module.TRANSFER)!=null) message("Đã gửi yêu cầu chuyển phòng. Mở Đăng ký & chuyển phòng để duyệt."); } finally { pendingStudent=null; } });
     }
     private String pendingStudent;
+    private java.time.YearMonth pendingMonth;
+    private String pendingRoom;
     public JPanel modulePanel(Module m) {
-        JPanel panel=new JPanel(new BorderLayout(6,6)); JTable table=table(); JPanel actions=new JPanel(new FlowLayout(FlowLayout.LEFT));
-        Runnable refresh=()->loadAsync(table,m.headers,()->dao.list(m));
+        JPanel panel=new JPanel(new BorderLayout(6,6)); JTable table=table(); JPanel actions=new JPanel(new WrapLayout());
+        JComboBox<String> assetRoom=m==Module.ASSET?new JComboBox<>(new String[]{"— Chọn phòng —"}):null;
+        if(assetRoom!=null) { actions.add(new JLabel("Phòng:"));actions.add(assetRoom);table.putClientProperty("emptyMessage","Chọn phòng để xem tài sản của phòng đó."); }
+        MonthPicker monthFilter=(m==Module.UTILITY || m==Module.PAYMENT)?new MonthPicker(java.time.YearMonth.now().minusMonths(m==Module.UTILITY?1:0)):null;
+        if(monthFilter!=null) { actions.add(new JLabel(m==Module.UTILITY?"Tháng sử dụng:":"Tháng hóa đơn:")); actions.add(monthFilter); }
+        Runnable refresh=()-> {
+            LocalDate month=monthFilter==null?null:monthFilter.getMonth().atDay(1);
+            String room=assetRoom==null || assetRoom.getSelectedIndex()<=0?null:(String)assetRoom.getSelectedItem();
+            if(assetRoom!=null) table.putClientProperty("emptyMessage",room==null?"Chọn phòng để xem tài sản của phòng đó.":"Phòng "+room+" chưa có tài sản.");
+            loadAsync(table,m.headers,()->assetRoom==null?dao.list(m,month):dao.assets(room));
+        };
+        if(assetRoom!=null) {
+            assetRoom.addActionListener(e->refresh.run());
+            panel.addHierarchyListener(e->{
+                if((e.getChangeFlags()&java.awt.event.HierarchyEvent.SHOWING_CHANGED)!=0 && panel.isShowing()) {
+                    new SwingWorker<List<String>,Void>() {
+                        protected List<String> doInBackground() throws Exception { return dao.assetRooms(); }
+                        protected void done() {
+                            try {
+                                String previous=(String)assetRoom.getSelectedItem();List<String> rooms=get();
+                                assetRoom.removeAllItems();assetRoom.addItem("— Chọn phòng —");rooms.forEach(assetRoom::addItem);
+                                if(rooms.contains(previous)) assetRoom.setSelectedItem(previous);else if(rooms.size()==1) assetRoom.setSelectedIndex(1);
+                            } catch(Exception failure) { message("Không tải được danh sách phòng. Hãy mở lại mục Tài sản phòng."); }
+                        }
+                    }.execute();
+                }
+            });
+        }
+        if(monthFilter!=null) monthFilter.onChange(refresh);
         button(actions,"Làm mới",refresh);
         String createLabel=switch(m) {
             case APPLICATION -> "Gửi đơn đăng ký"; case CONTRACT -> "Lập hợp đồng"; case TRANSFER -> "Yêu cầu chuyển phòng";
@@ -56,15 +84,27 @@ public final class ExtensionPanel extends JPanel {
             case PAYMENT -> "Ghi nhận thanh toán"; case NOTICE -> "Tạo thông báo"; case VIOLATION -> "Lập biên bản";
         };
         if(user.isStaff() || m.studentCanCreate) button(actions,createLabel,()->run(()->{
-            Map<String,String> values=form(m); if(values!=null) { refresh.run(); message("Đã lưu "+m.title.toLowerCase()+"."); }
+            if(assetRoom!=null && assetRoom.getSelectedIndex()<=0) { message("Chọn phòng trước khi thêm tài sản.");return; }
+            pendingRoom=assetRoom==null?null:(String)assetRoom.getSelectedItem();
+            pendingMonth=monthFilter==null?null:monthFilter.getMonth();
+            try { Map<String,String> values=form(m); if(values!=null) { refresh.run(); message("Đã lưu "+m.title.toLowerCase()+"."); } }
+            finally { pendingMonth=null; pendingRoom=null; }
         }));
         if(user.isStaff()) switch(m) {
             case APPLICATION, TRANSFER -> {
                 button(actions,"Duyệt",()->run(()->{
                     Object[] row=selected(table); if(row==null) return;
-                    String room=m==Module.APPLICATION?choose("Chọn phòng để xếp",dao.rooms()):null;
+                    String room=null;
+                    if(m==Module.APPLICATION) {
+                        List<ExtensionDao.ApplicationRoom> available=dao.applicationRooms(id(row));
+                        JComboBox<ExtensionDao.ApplicationRoom> rooms=new JComboBox<>(available.toArray(ExtensionDao.ApplicationRoom[]::new));
+                        UiTheme.decorate(rooms);
+                        if(JOptionPane.showConfirmDialog(this,rooms,"Xếp phòng · "+row[1]+" · "+row[2],JOptionPane.OK_CANCEL_OPTION,JOptionPane.PLAIN_MESSAGE)!=JOptionPane.OK_OPTION) return;
+                        ExtensionDao.ApplicationRoom chosen=(ExtensionDao.ApplicationRoom)rooms.getSelectedItem();
+                        if(chosen!=null) room=chosen.id();
+                    }
                     if(m==Module.APPLICATION && room==null) return;
-                    if(confirm("Duyệt yêu cầu số "+row[0]+"?")) { dao.transition(m,id(row),"APPROVE",room); refresh.run(); }
+                    if(confirm("Duyệt yêu cầu số "+row[0]+"?")) { dao.transition(m,id(row),"APPROVE",room); refresh.run();message(m==Module.APPLICATION?"Đã duyệt và xếp sinh viên "+row[1]+" vào phòng "+room+".":"Đã duyệt chuyển phòng."); }
                 }));
                 button(actions,"Từ chối",()->run(()->{
                     Object[] row=selected(table); if(row!=null && confirm("Từ chối yêu cầu số "+row[0]+"?")) { dao.transition(m,id(row),"REJECT",null); refresh.run(); }
@@ -118,11 +158,11 @@ public final class ExtensionPanel extends JPanel {
         button(actions,"Xuất danh sách",()->run(()->exportTable(table,m.title)));
         panel.add(actions,BorderLayout.NORTH); panel.add(new JScrollPane(table),BorderLayout.CENTER);
         String helpText=switch(m) {
-            case APPLICATION -> " Sinh viên cần có hồ sơ trước; quản lý duyệt và chọn phòng đúng loại, còn chỗ.";
+            case APPLICATION -> " Đơn xin xếp phòng cho sinh viên CHƯA CÓ PHÒNG. Chọn đơn Chờ duyệt → Duyệt → chọn phòng đúng loại còn chỗ. Sinh viên đã có phòng dùng tab Chuyển phòng.";
             case TRANSFER -> " Phòng cũ, ngày gửi được lưu tự động; duyệt sẽ chuyển phòng và cập nhật hợp đồng trong cùng giao dịch.";
-            case UTILITY -> " Chia đều cho cư dân hiện tại khi lập phí; chốt từng phần tiền, số lẻ thuộc sinh viên cuối danh sách. Mỗi phòng/kỳ lập một lần.";
+            case UTILITY -> " Ngày 01 lập tiền tháng trước (01/11 → tháng 10). Chia cho sinh viên đã ở trong tháng sử dụng; mỗi phòng/tháng chỉ lập một lần.";
             case CONTRACT -> " Mỗi sinh viên chỉ có một hợp đồng hiệu lực; gia hạn ngày kết thúc hoặc thanh lý và trả phòng.";
-            case PAYMENT -> " Chọn kỳ hóa đơn; hỗ trợ trả từng phần và chặn thanh toán vượt công nợ.";
+            case PAYMENT -> " Chọn tháng hóa đơn. Thanh toán toàn bộ số còn nợ hoặc nhập số tiền trả một phần; không được thu vượt nợ.";
             case NOTICE -> " Phòng để trống: toàn KTX; chọn mã phòng: chỉ cư dân phòng đó. Hạn dùng cho đóng tiền hoặc lịch bảo trì.";
             default -> " Bấm Làm mới để xem dữ liệu. Chọn một dòng để thực hiện thao tác.";
         };
@@ -135,27 +175,33 @@ public final class ExtensionPanel extends JPanel {
     private record Input(String key,String label,String type,String initial) { }
     private Input f(String key,String label,String type,String initial) { return new Input(key,label,type,initial); }
     private Map<String,String> form(Module m) throws Exception {
-        String today=LocalDate.now().toString(),period=LocalDate.now().withDayOfMonth(1).toString();
+        String today=LocalDate.now().toString(),period=(pendingMonth!=null?pendingMonth:java.time.YearMonth.now().minusMonths(m==Module.UTILITY?1:0)).atDay(1).toString();
         Input sv=f("MaSV","Sinh viên","student","");
         Input room=f("MaPhong","Phòng","room","");
-        Input ky=f("Ky","Kỳ (chọn ngày 01 của tháng)","text",period);
+        Input ky=f("Ky",m==Module.UTILITY?"Tháng sử dụng:":"Tháng hóa đơn:","month",period);
         List<Input> inputs=switch(m) {
             case APPLICATION -> List.of(sv,f("LoaiPhong","Loại phòng","type",""),f("GhiChu","Ghi chú","text",""));
             case CONTRACT -> List.of(sv,room,f("NgayBatDau","Ngày bắt đầu","text",today),f("NgayKetThuc","Ngày kết thúc","text",LocalDate.now().plusMonths(6).toString()),f("TienCoc","Tiền đặt cọc","text","0"));
             case TRANSFER -> List.of(sv,f("PhongMoi","Phòng muốn chuyển","room",""),f("LyDo","Lý do","text",""));
             case REPAIR -> List.of(sv,f("MoTa","Mô tả hư hỏng","text",""),f("Anh","Ảnh (tùy chọn)","image",""));
             case ASSET -> List.of(room,f("TenTaiSan","Tên tài sản","text",""),f("SoLuong","Số lượng","text","1"),f("TinhTrang","Tình trạng","text","Tốt"),f("BienBan","Biên bản bàn giao","text",""),f("NgayBanGiao","Ngày bàn giao","text",today));
-            case UTILITY -> List.of(room,ky,f("DienCu","Điện cũ (kWh)","text","0"),f("DienMoi","Điện mới (kWh)","text","0"),f("NuocCu","Nước cũ (m³)","text","0"),f("NuocMoi","Nước mới (m³)","text","0"),f("GiaDien","Giá điện / kWh","text","3000"),f("GiaNuoc","Giá nước / m³","text","15000"));
-            case PAYMENT -> List.of(sv,ky,f("SoTien","Số tiền thanh toán","text",""),f("GhiChu","Ghi chú / phương thức","text","Tiền mặt"));
+            case UTILITY -> List.of(room,f("NgayLap","Ngày lập (tính cho tháng trước)","text",today),ky,f("DienCu","Điện cũ (kWh)","text","0"),f("DienMoi","Điện mới (kWh)","text","0"),f("NuocCu","Nước cũ (m³)","text","0"),f("NuocMoi","Nước mới (m³)","text","0"),f("GiaDien","Giá điện / kWh","text","3000"),f("GiaNuoc","Giá nước / m³","text","15000"));
+            case PAYMENT -> List.of(sv,ky,f("CheDo","Cách thanh toán","paymentMode",""),f("SoDuNo","Dư nợ tháng đã chọn (đồng)","text",""),f("SoTien","Số tiền thanh toán (đồng)","text",""),f("GhiChu","Ghi chú / phương thức","text","Tiền mặt"));
             case NOTICE -> List.of(f("TieuDe","Tiêu đề","text",""),f("NoiDung","Nội dung","text",""),f("MaPhong","Phòng (trống = toàn KTX)","optionalRoom",""),f("Han","Hạn / Ngày thực hiện","text",today));
-            case VIOLATION -> List.of(sv,f("NgayViPham","Ngày vi phạm","text",today),f("NoiDung","Nội dung vi phạm","text",""),f("XuLy","Hình thức xử lý","text","Nhắc nhở"),f("TienPhat","Tiền phạt","text","0"));
+            case VIOLATION -> List.of(sv,f("NgayViPham","Ngày vi phạm","text",today),f("NoiDung","Nội dung vi phạm","text",""),f("HinhThuc","Hình thức xử lý","treatment",""),f("TienPhat","Tiền phạt hành chính (đồng)","text","0"),f("XuLy","Ghi chú / quyết định xử lý","text",""));
         };
         JPanel panel=new JPanel(new GridLayout(0,2,12,14)); Map<String,JComponent> controls=new LinkedHashMap<>();
         for(Input input:inputs) {
             JComponent control;
             switch(input.type) {
+                case "month" -> control=new MonthPicker(java.time.YearMonth.from(LocalDate.parse(input.initial)));
+                case "paymentMode","treatment" -> {
+                    JComboBox<String> options=combo(input.type.equals("paymentMode")?List.of("FULL","PARTIAL"):List.of("NHAC_NHO","HANH_CHINH","DINH_CHI"));
+                    options.setRenderer(new DefaultListCellRenderer() { @Override public Component getListCellRendererComponent(JList<?> list,Object value,int index,boolean selected,boolean focus) { return super.getListCellRendererComponent(list,UiTheme.status(Objects.toString(value,"")),index,selected,focus); } });
+                    control=options;
+                }
                 case "student" -> { JComboBox<String> students=combo(dao.students()); if(pendingStudent!=null) students.setSelectedItem(pendingStudent); control=students; }
-                case "room" -> control=combo(dao.rooms());
+                case "room" -> { JComboBox<String> rooms=combo(dao.rooms());if(m==Module.ASSET && pendingRoom!=null) { rooms.setSelectedItem(pendingRoom);rooms.setEnabled(false); }control=rooms; }
                 case "type" -> control=combo(dao.roomTypes());
                 case "optionalRoom" -> { List<String> rooms=new ArrayList<>(dao.rooms()); rooms.add(0,""); control=combo(rooms); }
                 default -> {
@@ -177,30 +223,58 @@ public final class ExtensionPanel extends JPanel {
             } else if(control instanceof JTextArea) panel.add(new JScrollPane(control));
             else panel.add(control);
         }
+        if(m==Module.UTILITY) {
+            com.toedter.calendar.JDateChooser issued=(com.toedter.calendar.JDateChooser)controls.get("NgayLap");
+            issued.addPropertyChangeListener("date",event->{ if(issued.getDate()!=null) ((MonthPicker)controls.get("Ky")).setMonth(java.time.YearMonth.from(issued.getDate().toInstant().atZone(java.time.ZoneId.systemDefault()).toLocalDate()).minusMonths(1)); });
+        }
+        if(m==Module.VIOLATION) {
+            JComboBox<?> kind=(JComboBox<?>)controls.get("HinhThuc"); JTextField fine=(JTextField)controls.get("TienPhat");
+            Runnable toggle=()-> { boolean enabled="HANH_CHINH".equals(kind.getSelectedItem()); fine.setEditable(enabled); if(!enabled) fine.setText("0"); };
+            kind.addActionListener(e->toggle.run()); toggle.run();
+            panel.add(new JLabel("Đình chỉ lưu trú:")); panel.add(new JLabel("<html>Trả phòng, chấm dứt hợp đồng và vé tháng.<br>Giữ lịch sử, công nợ; chặn xếp phòng lại.</html>"));
+        }
+        if(m==Module.PAYMENT) bindPayment(controls);
         UiTheme.decorate(panel);
         while(JOptionPane.showConfirmDialog(this,panel,"Thêm · "+m.title,JOptionPane.OK_CANCEL_OPTION,JOptionPane.PLAIN_MESSAGE)==JOptionPane.OK_OPTION) {
             Map<String,String> values=new LinkedHashMap<>();
             controls.forEach((key,c)-> {
                 String value;
-                if(c instanceof JComboBox<?> cb) value=Objects.toString(cb.getSelectedItem(),"");
+                if(c instanceof MonthPicker month) value=month.getMonth().atDay(1).toString();
+                else if(c instanceof JComboBox<?> cb) value=Objects.toString(cb.getSelectedItem(),"");
                 else if(c instanceof com.toedter.calendar.JDateChooser date) value=date.getDate()==null?"":date.getDate().toInstant().atZone(java.time.ZoneId.systemDefault()).toLocalDate().toString();
                 else value=((javax.swing.text.JTextComponent)c).getText().trim();
                 values.put(key,value);
             });
+            if(m==Module.VIOLATION && "DINH_CHI".equals(values.get("HinhThuc")) && !confirm("Đình chỉ lưu trú sinh viên "+values.get("MaSV")+"? Sinh viên sẽ bị trả phòng, chấm dứt hợp đồng/vé tháng và không thể xếp phòng lại.")) continue;
             // Giữ dữ liệu người dùng vừa nhập khi có lỗi xác thực.
             try { dao.create(m,values); return values; }
             catch(Exception e) { JOptionPane.showMessageDialog(this,e.getMessage(),"Không thể lưu",JOptionPane.WARNING_MESSAGE); }
         }
         return null;
     }
+    private void bindPayment(Map<String,JComponent> controls) {
+        JComboBox<?> student=(JComboBox<?>)controls.get("MaSV"),mode=(JComboBox<?>)controls.get("CheDo");
+        MonthPicker month=(MonthPicker)controls.get("Ky"); JTextField debt=(JTextField)controls.get("SoDuNo"),amount=(JTextField)controls.get("SoTien");
+        debt.setEditable(false); int[] request={0};
+        Runnable toggle=()->{ boolean full="FULL".equals(mode.getSelectedItem()); amount.setEditable(!full); if(full) amount.setText(debt.getText()); else amount.setText(""); };
+        Runnable refresh=()->{
+            String sv=Objects.toString(student.getSelectedItem(),""); LocalDate selected=month.getMonth().atDay(1); int ticket=++request[0]; debt.setText("Đang tải…");
+            new SwingWorker<java.math.BigDecimal,Void>() {
+                protected java.math.BigDecimal doInBackground() throws Exception { return dao.remaining(sv,selected); }
+                protected void done() { if(ticket!=request[0]) return; try { debt.setText(get().toPlainString()); if("FULL".equals(mode.getSelectedItem())) amount.setText(debt.getText()); } catch(Exception error) { debt.setText("Không tải được dư nợ"); } }
+            }.execute();
+        };
+        student.addActionListener(e->refresh.run()); month.onChange(refresh); mode.addActionListener(e->toggle.run());toggle.run();refresh.run();
+    }
     public JPanel billingPanel() {
-        JPanel panel=new JPanel(new BorderLayout()); JPanel actions=new JPanel(new FlowLayout(FlowLayout.LEFT)); JTable table=table();
-        JTextField period=new JTextField(LocalDate.now().withDayOfMonth(1).toString(),10);
-        actions.add(new JLabel("Kỳ (yyyy-MM-01):")); actions.add(period);
-        Runnable refresh=()->run(()-> { LocalDate d=readPeriod(period); loadAsync(table,new String[]{"Sinh viên","Kỳ","Tổng phải trả","Đã trả","Còn nợ"},()->dao.debts(d)); });
+        JPanel panel=new JPanel(new BorderLayout()); JPanel actions=new JPanel(new WrapLayout()); JTable table=table();
+        MonthPicker period=new MonthPicker(java.time.YearMonth.now());
+        actions.add(period);
+        Runnable refresh=()->run(()-> { LocalDate d=period.getMonth().atDay(1); loadAsync(table,new String[]{"Sinh viên","Tháng","Tổng phải trả","Đã trả","Còn nợ"},()->dao.debts(d)); });
+        period.onChange(refresh);
         button(actions,"Xem công nợ",refresh);
         button(actions,"Chi tiết hóa đơn",()->run(()->{
-            LocalDate d=readPeriod(period);
+            LocalDate d=period.getMonth().atDay(1);
             List<Object[]> rows=new ArrayList<>(new KtxDao().getInvoices(d.getMonthValue(),d.getYear()));
             if(!user.isStaff()) rows.removeIf(r->!user.studentId().equals(r[0]));
             JTable detail=table(); fill(detail,KtxDao.INVOICE_COLUMNS,rows);

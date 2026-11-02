@@ -58,6 +58,15 @@ public final class UiRegressionTest {
                 MainFrame staffFrame=new MainFrame(new vn.ktx.model.UserSession("staff","STAFF",null));
                 try { check(!((WorkspacePanel)staffFrame.getContentPane()).pageKeys().contains("accounts"),"Nhân viên không có menu quản lý tài khoản"); }
                 finally { staffFrame.dispose(); }
+                ParkingPanel parking=new ParkingPanel();
+                check(find(parking,JSpinner.class).isEmpty(),"Quầy gửi xe không có ô nhập giờ vào/ra");
+                check(find(parking,JButton.class).stream().anyMatch(b->"Gửi xe".equals(b.getText())),"Có nút xe vào bãi");
+                check(find(parking,JButton.class).stream().anyMatch(b->"Lấy xe / tính tiền".equals(b.getText())),"Có nút lấy xe theo thời gian thực");
+                JPanel utility=new ExtensionPanel(session,false).modulePanel(vn.ktx.dao.ExtensionDao.Module.UTILITY);
+                check(find(utility,MonthPicker.class).get(0).getMonth().equals(java.time.YearMonth.now().minusMonths(1)),"Điện nước mặc định chọn tháng trước");
+                utility.setSize(820,550);layout(utility);
+                JPanel tools=(JPanel)((BorderLayout)utility.getLayout()).getLayoutComponent(BorderLayout.NORTH);
+                check(find(tools,JButton.class).stream().allMatch(b->b.getY()+b.getHeight()<=b.getParent().getHeight()),"Thanh công cụ xuống dòng không che nút khi cửa sổ hẹp");
             });
             // Đợi worker số liệu tổng quan; không chặn EDT.
             for(int attempt=0;attempt<100;attempt++) {

@@ -1,7 +1,7 @@
 package vn.ktx;
 
 import javax.swing.SwingUtilities;
-import javax.swing.UIManager;
+
 import vn.ktx.ui.MainFrame;
 import vn.ktx.ui.LoginDialog;
 import vn.ktx.ui.ExtensionPanel;

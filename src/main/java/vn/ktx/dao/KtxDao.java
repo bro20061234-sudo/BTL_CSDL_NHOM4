@@ -2,6 +2,7 @@ package vn.ktx.dao;
 
 import vn.ktx.config.Database;
 import vn.ktx.model.Student;
+import vn.ktx.model.RoomType;
 
 import java.sql.Connection;
 import java.sql.Date;
@@ -29,7 +30,7 @@ public class KtxDao {
     public static final String[] ROOM_COLUMNS = {"Mã phòng", "Số phòng", "Loại phòng", "Đơn giá/tháng", "Sức chứa", "Đang ở"};
     public static final String[] SERVICE_COLUMNS = {"Mã DV", "Tên dịch vụ", "Đơn giá"};
     public static final String[] USAGE_COLUMNS = {"Mã sử dụng", "Mã SV", "Sinh viên", "Mã DV", "Dịch vụ", "Thời gian", "Số lượng"};
-    public static final String[] VEHICLE_COLUMNS = {"Mã xe", "Mã SV", "Sinh viên", "Biển số", "Loại xe", "Ngày đăng ký", "Phí tháng"};
+    public static final String[] VEHICLE_COLUMNS = {"Mã xe", "Mã SV", "Sinh viên", "Biển số", "Loại xe", "Ngày đăng ký", "Phí tháng", "Ngày kết thúc"};
     public static final String[] PARKING_COLUMNS = {"Mã lượt", "Mã xe", "Sinh viên", "Biển số", "Thời gian gửi", "Thời gian lấy", "Phí phát sinh"};
     public static final String[] GUEST_COLUMNS = {"Mã khách", "CCCD", "Họ tên", "Ngày sinh", "Mã SV", "Sinh viên", "Ngày đến"};
     public static final String[] INVOICE_COLUMNS = {"Mã SV", "Họ tên", "Mã phòng", "Tiền phòng", "Dịch vụ cơ bản", "Xe vé tháng", "Xe phát sinh", "Tổng tiền", "Điện nước", "Tiền phạt"};
@@ -42,7 +43,8 @@ public class KtxDao {
 
     public List<Object[]> findStudents(String search) throws SQLException {
         String pattern = "%" + (search == null ? "" : search.trim()) + "%";
-        return query("SELECT MaSV, SoCMT, HoTen, NgaySinh, Lop, QueQuan, MaPhong, NgayVaoKTX " +
+        return query("SELECT MaSV, SoCMT, HoTen, NgaySinh, Lop, QueQuan, MaPhong, NgayVaoKTX, " +
+                        "CASE WHEN EXISTS(SELECT 1 FROM DinhChiLuuTru d WHERE d.MaSV=SinhVien.MaSV) THEN 'Đình chỉ lưu trú' WHEN MaPhong IS NULL THEN 'Chờ xếp phòng' ELSE 'Đang ở' END " +
                         "FROM SinhVien WHERE MaSV LIKE ? OR HoTen LIKE ? OR Lop LIKE ? ORDER BY MaSV",
                 pattern, pattern, pattern);
     }
@@ -111,12 +113,30 @@ public class KtxDao {
     }
 
     public void saveRoom(String id, String number, String type, BigDecimal price, int capacity, boolean insert) throws SQLException {
+        RoomType template=RoomType.find(type);
+        if(template==null && insert) throw new SQLException("Hãy chọn phòng tiêu chuẩn, cao cấp hoặc VIP.");
+        if(template!=null && capacity!=template.capacity()) throw new SQLException("Sức chứa của "+type+" phải là "+template.capacity()+" người.");
         if (price.signum() < 0 || capacity < 1) throw new SQLException("Đơn giá phải không âm và sức chứa phải lớn hơn 0.");
         String sql = insert
                 ? "INSERT INTO Phong (MaPhong, SoPhong, LoaiPhong, DonGia, SoNguoiToiDa) VALUES (?, ?, ?, ?, ?)"
                 : "UPDATE Phong SET SoPhong=?, LoaiPhong=?, DonGia=?, SoNguoiToiDa=? WHERE MaPhong=?";
-        if (insert) execute(sql, id, number, type, price, capacity);
-        else execute(sql, number, type, price, capacity, id);
+        try(Connection c=Database.getConnection()) {
+            c.setAutoCommit(false);
+            try {
+                if(!insert) {
+                    if(ExtensionDao.query(c,"SELECT MaPhong FROM Phong WHERE MaPhong=? FOR UPDATE",id).isEmpty()) throw new SQLException("Phòng không tồn tại.");
+                    int occupied=((Number)ExtensionDao.query(c,"SELECT COUNT(*) FROM SinhVien WHERE MaPhong=?",id).get(0)[0]).intValue();
+                    if(occupied>capacity) throw new SQLException("Không thể giảm sức chứa: phòng đang có "+occupied+" người.");
+                }
+                try(PreparedStatement p=c.prepareStatement(sql)) { bind(p,insert?new Object[]{id,number,type,price,capacity}:new Object[]{number,type,price,capacity,id}); requireUpdated(p.executeUpdate(),"Không tìm thấy phòng."); }
+                if(template!=null) for(RoomType.Asset asset:template.assets()) {
+                    try(PreparedStatement p=c.prepareStatement("INSERT INTO TaiSan(MaPhong,TenTaiSan,SoLuong,TinhTrang,BienBan,NgayBanGiao) SELECT ?,?,?,'Tốt',?,CURRENT_DATE WHERE NOT EXISTS(SELECT 1 FROM TaiSan WHERE MaPhong=? AND TenTaiSan=?)")) {
+                        bind(p,new Object[]{id,asset.name(),asset.quantity(),"Tài sản mặc định - "+type,id,asset.name()}); p.executeUpdate();
+                    }
+                }
+                c.commit();
+            } catch(SQLException e) { c.rollback(); throw e; }
+        }
     }
 
     public void deleteRoom(String id) throws SQLException {
@@ -164,13 +184,14 @@ public class KtxDao {
     }
 
     public List<Object[]> getVehicles() throws SQLException {
-        return query("SELECT x.MaXe, x.MaSV, sv.HoTen, x.BienSo, x.LoaiXe, x.NgayDangKy, x.DonGiaThang " +
+        return query("SELECT x.MaXe, x.MaSV, sv.HoTen, x.BienSo, x.LoaiXe, x.NgayDangKy, x.DonGiaThang, x.NgayKetThuc " +
                 "FROM XeVeThang x JOIN SinhVien sv ON sv.MaSV=x.MaSV ORDER BY x.MaXe DESC");
     }
 
     public void addVehicle(String studentId, String plate, String type, LocalDate registrationDate) throws SQLException {
+        if(hasRows("SELECT 1 FROM DinhChiLuuTru WHERE MaSV=?",studentId)) throw new SQLException("Sinh viên đã đình chỉ lưu trú, không được đăng ký vé tháng mới.");
         try (Connection connection = Database.getConnection();
-             PreparedStatement count = connection.prepareStatement("SELECT COUNT(*) FROM XeVeThang WHERE MaSV=?")) {
+             PreparedStatement count = connection.prepareStatement("SELECT COUNT(*) FROM XeVeThang WHERE MaSV=? AND NgayKetThuc IS NULL")) {
             count.setString(1, studentId);
             try (ResultSet rs = count.executeQuery()) {
                 rs.next();
@@ -201,10 +222,11 @@ public class KtxDao {
     }
 
     public List<Object[]> getVehicleChoices() throws SQLException {
-        return query("SELECT x.MaXe, x.BienSo, x.MaSV FROM XeVeThang x ORDER BY x.MaXe");
+        return query("SELECT x.MaXe, x.BienSo, x.MaSV FROM XeVeThang x WHERE x.NgayKetThuc IS NULL ORDER BY x.MaXe");
     }
 
     public void addParkingLog(int vehicleId, LocalDateTime sentAt) throws SQLException {
+        if(!hasRows("SELECT 1 FROM XeVeThang x WHERE MaXe=? AND NgayDangKy<=? AND (NgayKetThuc IS NULL OR NgayKetThuc>=?) AND NOT EXISTS(SELECT 1 FROM DinhChiLuuTru d WHERE d.MaSV=x.MaSV AND d.Ngay<=?)",vehicleId,Date.valueOf(sentAt.toLocalDate()),Date.valueOf(sentAt.toLocalDate()),Date.valueOf(sentAt.toLocalDate()))) throw new SQLException("Vé tháng không có hiệu lực vào ngày gửi.");
         execute("INSERT INTO NhatKyGuiXe (MaXe, ThoiGianGui) VALUES (?, ?)",
                 vehicleId, Timestamp.valueOf(sentAt));
     }
@@ -235,13 +257,13 @@ public class KtxDao {
                 "FROM SinhVien sv LEFT JOIN Phong p ON p.MaPhong=sv.MaPhong " +
                 "LEFT JOIN (SELECT sd.MaSV, SUM(sd.SoLuong*d.DonGia) TienDV FROM SuDungDichVu sd " +
                 "JOIN DichVu d ON d.MaDV=sd.MaDV WHERE sd.ThoiGianSuDung>=? AND sd.ThoiGianSuDung<? GROUP BY sd.MaSV) dv ON dv.MaSV=sv.MaSV " +
-                "LEFT JOIN (SELECT MaSV, SUM(DonGiaThang) TienXe FROM XeVeThang WHERE NgayDangKy<? GROUP BY MaSV) xe ON xe.MaSV=sv.MaSV " +
+                "LEFT JOIN (SELECT MaSV, SUM(DonGiaThang) TienXe FROM XeVeThang WHERE NgayDangKy<? AND (NgayKetThuc IS NULL OR NgayKetThuc>=?) GROUP BY MaSV) xe ON xe.MaSV=sv.MaSV " +
                 "LEFT JOIN (SELECT x.MaSV, SUM(n.TienPhatSinh) TienPhatSinh FROM NhatKyGuiXe n JOIN XeVeThang x ON x.MaXe=n.MaXe " +
                 "WHERE n.ThoiGianGui>=? AND n.ThoiGianGui<? GROUP BY x.MaSV) park ON park.MaSV=sv.MaSV ORDER BY sv.MaSV";
         LocalDate first = LocalDate.of(year, month, 1);
         LocalDate next = first.plusMonths(1);
         List<Object[]> rows = query(sql, Timestamp.valueOf(first.atStartOfDay()),
-                Timestamp.valueOf(next.atStartOfDay()), Date.valueOf(next),
+                Timestamp.valueOf(next.atStartOfDay()), Date.valueOf(next), Date.valueOf(first),
                 Timestamp.valueOf(first.atStartOfDay()), Timestamp.valueOf(next.atStartOfDay()));
         List<Object[]> normalized = new ArrayList<>(rows.size());
         try (Connection c = Database.getConnection()) {
